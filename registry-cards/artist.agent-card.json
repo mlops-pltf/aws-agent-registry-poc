@@ -1,0 +1,42 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "Visual artist and creative director. Designs artwork concepts, murals, brand visuals and exhibitions, and prices commissioned artwork.",
+  "name": "Artist Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Designs murals, exhibitions, brand visuals and artwork concepts.",
+      "id": "art-concept",
+      "name": "Artwork and visual concept design",
+      "tags": [
+        "art",
+        "design",
+        "creative",
+        "branding",
+        "mural",
+        "exhibition"
+      ]
+    },
+    {
+      "description": "Estimates commission prices for artwork by medium, size and effort.",
+      "id": "art-pricing",
+      "name": "Artwork pricing",
+      "tags": [
+        "art",
+        "pricing",
+        "commission"
+      ]
+    }
+  ],
+  "url": "https://bedrock-agentcore.<REGION>.amazonaws.com/runtimes/<URL_ENCODED_RUNTIME_ARN>/invocations/",
+  "version": "1.0.0"
+}

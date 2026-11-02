@@ -1,0 +1,42 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "Certified personal fitness trainer. Designs workout plans, estimates calorie burn, and coaches on strength, mobility, posture, energy and healthy routines.",
+  "name": "Fitness Trainer Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Designs weekly training plans for strength, endurance, posture and health.",
+      "id": "training-plans",
+      "name": "Workout and training plans",
+      "tags": [
+        "fitness",
+        "workout",
+        "exercise",
+        "health",
+        "training"
+      ]
+    },
+    {
+      "description": "Estimates calories burned and physical demand of activities and jobs.",
+      "id": "activity-energy",
+      "name": "Calorie and energy estimates",
+      "tags": [
+        "fitness",
+        "calories",
+        "energy",
+        "wellbeing"
+      ]
+    }
+  ],
+  "url": "https://bedrock-agentcore.<REGION>.amazonaws.com/runtimes/<URL_ENCODED_RUNTIME_ARN>/invocations/",
+  "version": "1.0.0"
+}

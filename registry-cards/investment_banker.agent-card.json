@@ -1,0 +1,43 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "Investment banker and financial planner. Builds investment and savings plans, models growth and returns, and advises on budgets, funding and business finance.",
+  "name": "Investment Banker Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Builds investment plans and projects growth for a risk profile and horizon.",
+      "id": "investment-planning",
+      "name": "Investment planning",
+      "tags": [
+        "finance",
+        "investment",
+        "portfolio",
+        "returns",
+        "wealth"
+      ]
+    },
+    {
+      "description": "Plans budgets, savings, funding and the finances of a business or project.",
+      "id": "budgeting",
+      "name": "Budgeting and business finance",
+      "tags": [
+        "finance",
+        "budget",
+        "savings",
+        "funding",
+        "business"
+      ]
+    }
+  ],
+  "url": "https://bedrock-agentcore.<REGION>.amazonaws.com/runtimes/<URL_ENCODED_RUNTIME_ARN>/invocations/",
+  "version": "1.0.0"
+}

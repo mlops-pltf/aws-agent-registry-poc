@@ -1,0 +1,222 @@
+# User Guide
+
+1. [Prerequisites](#1-prerequisites)
+2. [Deploying the agents](#2-deploying-the-agents)
+3. [IAM permissions](#3-iam-permissions)
+4. [Registering agents in Agent Registry](#4-registering-agents-in-agent-registry)
+5. [Running the demo](#5-running-the-demo)
+6. [Running an agent locally](#6-running-an-agent-locally)
+7. [Customising the agents](#7-customising-the-agents)
+8. [Adding a new agent](#8-adding-a-new-agent)
+9. [Troubleshooting](#9-troubleshooting)
+
+---
+
+## 1. Prerequisites
+
+- An AWS account and region with **AgentCore Runtime** and **AWS Agent Registry**. The examples use `us-east-1`.
+- An **Agent Registry** (create one in the console if needed). Note its ID.
+- Access to a Claude model in **Amazon Bedrock** in that region.
+- For the registration script: Python 3.10+, a recent `boto3` (tested with 1.43.123), and an AWS profile with Agent Registry admin rights. The default profile is `non-prod-admin`.
+
+## 2. Deploying the agents
+
+Your CI/CD pipeline handles deployment. For each folder under `agents/`:
+
+1. Build the image from that folder's `Dockerfile`. It targets **`linux/arm64`**, which AgentCore Runtime requires.
+2. Push the image to ECR.
+3. Create or update an AgentCore Runtime with these settings:
+   - **Protocol:** `A2A`. The container serves A2A JSON-RPC on `0.0.0.0:9000/`, the health check on `/ping`, and its card on `/.well-known/agent-card.json`.
+   - **Inbound auth:** IAM (SigV4). The agents call each other with SigV4-signed `InvokeAgentRuntime`, so peer runtimes must accept IAM auth.
+   - **Environment variables:**
+
+     | Variable | Required | Default | Description |
+     |---|---|---|---|
+     | `REGISTRY_ID` | yes | | Agent Registry ID or ARN to search |
+     | `AWS_REGION` | no | `us-east-1` | Region of the registry and peer runtimes |
+     | `MODEL_ID` | no | `anthropic.claude-opus-5-5` | Bedrock model or inference profile ID; set this to what your region uses |
+
+**Naming tip:** if each runtime's name contains `artist`, `investment_banker` or `fitness_trainer`, the registration script finds the runtimes automatically. Underscores and hyphens are ignored when matching.
+
+## 3. IAM permissions
+
+**Each agent's execution role** needs the standard AgentCore Runtime permissions (ECR pull, CloudWatch Logs, X-Ray/OTel) plus:
+
+| Purpose | Permission | Resource |
+|---|---|---|
+| Call the model | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | The model or inference profile |
+| Discover peers | Agent Registry search/list/get of discoverable records | Your registry |
+| Call peers | `bedrock-agentcore:InvokeAgentRuntime` | The **other two** runtime ARNs (and their endpoints) |
+
+Take the exact Agent Registry IAM action names from the *Service Authorization Reference* for Agent Registry. List specific runtime ARNs rather than `*`, so an agent can only call agents you've approved.
+
+**The registration profile** (`non-prod-admin`) needs Agent Registry record create, update, submit and status-update permissions, plus `bedrock-agentcore:ListAgentRuntimes` when the script looks up runtimes by name.
+
+> Discovery is not authorization. The registry only returns metadata; IAM decides who can actually invoke which runtime.
+
+## 4. Registering agents in Agent Registry
+
+Each agent is registered as one record:
+
+- **Record type:** `AGENT`
+- **Descriptor:** `a2aAgentCard`, `dataSchemaVersion` `0.3`
+- **Card `url`:** `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<URL-encoded runtime ARN>/invocations/`
+
+The agents get the runtime ARN to call from the card's `url`. If the URL is wrong, search still finds the agent but the call fails.
+
+### Option A: the script (recommended)
+
+```bash
+# Preview: prints the account, resolved runtime ARNs and final cards. Changes nothing.
+python scripts/register_agents.py --registry <registry name or ID> --dry-run
+
+# Create or update all three records, submit them, and approve them
+python scripts/register_agents.py --registry <registry name or ID> --approve
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--registry` | (required) | Registry ID, ARN or name |
+| `--profile` | `non-prod-admin` | AWS profile |
+| `--region` | `us-east-1` | AWS region |
+| `--runtime AGENT=ARN_OR_NAME` | auto-detect | Set an agent's runtime explicitly. Repeatable. `AGENT` is `artist`, `investment_banker` or `fitness_trainer`. |
+| `--only AGENT` | all | Register only these agents. Repeatable. |
+| `--approve` | off | Also approve records left in `PENDING_APPROVAL` (needs curator rights) |
+| `--dry-run` | off | Show what would be registered and stop |
+
+For each agent the script:
+
+1. Finds the runtime ARN.
+2. Fills the URL into `registry-cards/<agent>.agent-card.json`.
+3. Creates the record named `artist-agent`, `investment-banker-agent` or `fitness-trainer-agent`, or updates it if it already exists.
+4. Waits while the record is `CREATING` or `UPDATING`.
+5. Submits it for approval if it's a `DRAFT`, and approves it if you passed `--approve`.
+
+Running it again never creates duplicates. Re-run it whenever a runtime ARN or a card changes.
+
+### Option B: the AWS console
+
+1. Copy the runtime ARN from the AgentCore console and URL-encode it:
+   ```bash
+   python3 -c "from urllib.parse import quote; print(quote('<runtime ARN>', safe=''))"
+   ```
+2. Open `registry-cards/<agent>.agent-card.json` and replace `<REGION>` and `<URL_ENCODED_RUNTIME_ARN>` in `url`.
+3. In Agent Registry, open your registry and create a record:
+   - **Record type:** Agent
+   - **Descriptor:** A2A Agent Card, schema 0.3
+   - **Card:** paste the edited JSON
+   - **Name:** `artist-agent`, `investment-banker-agent` or `fitness-trainer-agent`
+4. Submit the record for approval and approve it. **Search only returns `APPROVED` records.**
+5. Check it: search for "investment planning" in the console and confirm the banker record comes back.
+
+### When to re-register
+
+| Change | Action |
+|---|---|
+| Runtime updated in place (same ARN) | Nothing |
+| New runtime created (new ARN) | Re-run the script or update the card URL |
+| Agent's skills or description changed | Update the card in `registry-cards/` and the `agent_card` in `agent.py`, then re-run |
+| Agent retired | Set the record to `DEPRECATED` so it's no longer discoverable |
+
+## 5. Running the demo
+
+Send any of these to an agent's runtime with the AgentCore console's test pane, an A2A client, or `InvokeAgentRuntime`. Each crosses domains, so the agent consults its peers.
+
+| Send to | Prompt | Expected collaboration |
+|---|---|---|
+| Artist | *I'm an established muralist. I've been offered a 400 sq ft mural, about 120 hours of work. What should I charge, how should I invest the fee over 10 years, and how do I stay fit through weeks on a ladder?* | Prices it (~$30,800), asks the banker and the trainer |
+| Investment Banker | *I run a small gym and want to spend $15,000 on a wall mural to rebrand. Is it worth it, and how should I budget for it on $6,000/month take-home with $3,200 fixed costs?* | Runs the budget, asks the artist about the mural |
+| Fitness Trainer | *I'm a desk-bound analyst. Build me a 4-day posture plan, and tell me whether a $1,500 home gym is a sensible spend if I'm saving $800/month.* | Builds the plan, asks the banker |
+
+**What to watch** (CloudWatch logs for each runtime):
+
+- `A2A -> Investment Banker Agent: …`: the outbound call, with the self-contained question.
+- In the peer's logs, the incoming request starting with `[A2A request from Artist Agent]`.
+- The final answer credits each peer ("Our investment banker suggests…").
+
+Example A2A request body, if you call a runtime directly:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "messageId": "b7d1c1d0-0000-4000-8000-000000000001",
+      "parts": [{"kind": "text", "text": "What should I charge for a 400 sq ft mural?"}]
+    }
+  }
+}
+```
+
+## 6. Running an agent locally
+
+You can run an agent on your machine. Calls to peers still go to the **deployed** peer runtimes, found through the registry, using your local AWS credentials.
+
+```bash
+cd agents/artist
+python -m venv .venv && source .venv/bin/activate
+pip install "strands-agents~=1.57.2" "bedrock-agentcore[a2a,strands-agents]~=1.24.0" \
+            "a2a-sdk[all]~=0.3.26" "boto3>=1.43.107"
+
+export AWS_PROFILE=non-prod-admin AWS_REGION=us-east-1 REGISTRY_ID=<registry ID>
+python agent.py          # serves on http://127.0.0.1:9000
+```
+
+In another terminal:
+
+```bash
+curl -s localhost:9000/ping
+curl -s localhost:9000/.well-known/agent-card.json | jq .
+curl -s -X POST localhost:9000/ -H 'Content-Type: application/json' -d '{
+  "jsonrpc":"2.0","id":"1","method":"message/send",
+  "params":{"message":{"role":"user","messageId":"m-1",
+  "parts":[{"kind":"text","text":"Price a 100 sq ft oil painting, 40 hours, emerging artist."}]}}}' | jq .
+```
+
+Or run the container exactly as AgentCore would:
+
+```bash
+docker build --platform linux/arm64 -t artist-agent agents/artist
+docker run --rm -p 9000:9000 -e REGISTRY_ID=<id> -e AWS_REGION=us-east-1 \
+  -v ~/.aws:/home/agent/.aws:ro -e AWS_PROFILE=non-prod-admin artist-agent
+```
+
+## 7. Customising the agents
+
+| To change | Edit |
+|---|---|
+| Persona, tone, when to consult peers | `SYSTEMPROMPT.md` (read at startup; no code change) |
+| Domain tools | The **Domain tools** section of `agent.py`; add new tools to `tools=[…]` in `create_agent` |
+| How the agent is described to others | `AGENT_NAME`, `AGENT_DESCRIPTION` and `agent_card.skills` in `agent.py`, **and** the matching `registry-cards/*.json`, then re-register |
+| Model | `MODEL_ID` environment variable |
+| Number of search results | `maxResults` in `find_peer_agents` |
+
+Search is semantic, over the record name, description and card. Specific skill descriptions and tags make an agent easier to find for the right requests.
+
+## 8. Adding a new agent
+
+1. Copy an existing folder, for example `cp -r agents/fitness_trainer agents/nutritionist`.
+2. In `agent.py`, change the docstring, `AGENT_NAME`, `AGENT_DESCRIPTION`, the domain tools, the `tools=[…]` list and `agent_card.skills`. Leave the **Agent Registry discovery + A2A invocation** section as it is.
+3. Rewrite `SYSTEMPROMPT.md`. Keep the "Working with other agents" section.
+4. Add `registry-cards/nutritionist.agent-card.json`, the same card with the URL placeholder.
+5. Add `"nutritionist": "nutritionist-agent"` to `AGENTS` in `scripts/register_agents.py`.
+6. Deploy it, grant IAM, and register: `python scripts/register_agents.py --registry <id> --only nutritionist --approve`.
+7. Give the existing agents' roles `InvokeAgentRuntime` on the new runtime. **No code changes or redeploys are needed** for them; they find it on their next search.
+
+## 9. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `find_peer_agents` returns "No matching agents" | Record not `APPROVED`, wrong `REGISTRY_ID`, or the query doesn't match the card | Check record status; check the env var; improve the card's description and skills |
+| `<agent> could not be reached: AccessDeniedException` | Caller role lacks `InvokeAgentRuntime` on the peer, or the peer uses OAuth inbound auth | Grant the permission; set the peer's inbound auth to IAM |
+| `No runtime ARN for registry record …` in logs | Card `url` doesn't contain the runtime ARN | Re-register; the URL must be the AgentCore runtime URL |
+| `ResourceNotFoundException` / JSON-RPC `-32051` on peer call | Runtime deleted or replaced (new ARN) | Re-run `register_agents.py` |
+| `RuntimeClientError` / HTTP 424 | Peer container crashed or isn't on port 9000 | Check the peer's CloudWatch logs |
+| Unknown service `agent-registry` | Old boto3 | `pip install -U boto3` (≥ 1.43.107) |
+| Script: "Could not pick one runtime" | Zero or several runtime names match | Pass `--runtime AGENT=<ARN or exact name>` |
+| Script: record `CREATE_FAILED` / `UPDATE_FAILED` | Card failed schema validation | Read the printed `statusReason`, fix the card JSON |
+| Model error at startup or first call | `MODEL_ID` not enabled in the region | Use a model or inference profile ID available in your account |
+| Agents keep calling each other | Shouldn't happen: the loop guard blocks calls from peer requests | Make sure the `PEER_PREFIX` logic in `agent.py` is unchanged in every agent |
