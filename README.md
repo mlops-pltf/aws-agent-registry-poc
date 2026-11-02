@@ -43,9 +43,9 @@ Every agent has the same two networking tools:
 
 ```
 agents/
-  artist/              Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
-  investment_banker/   Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
-  fitness_trainer/     Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
+  artist/              Dockerfile · requirements.txt · agent.yaml · agent.py · SYSTEMPROMPT.md
+  investment_banker/   Dockerfile · requirements.txt · agent.yaml · agent.py · SYSTEMPROMPT.md
+  fitness_trainer/     Dockerfile · requirements.txt · agent.yaml · agent.py · SYSTEMPROMPT.md
 registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
@@ -56,24 +56,26 @@ docs/
   USER_GUIDE.md        Deploy, register, demo, extend, troubleshoot
 ```
 
-Each agent folder is self-contained, with the four files your CI/CD builds:
+Each agent folder is self-contained, with the five files your CI/CD uses:
 
 | File | Purpose |
 |---|---|
 | `Dockerfile` | `linux/arm64` image; installs `requirements.txt`, serves on port 9000 |
 | `requirements.txt` | Pinned Strands, AgentCore, A2A, boto3 and OpenTelemetry dependencies |
+| `agent.yaml` | Environment variables, in a `local:` block and a `deployed:` block, injected by the framework |
 | `agent.py` | AgentCore entrypoint: domain tools, peer tools, agent card, `serve_a2a` server |
 | `SYSTEMPROMPT.md` | Persona, when to consult peers, how to answer peers |
 
 ## Quick start
 
-1. **Deploy** each `agents/<name>/` folder as an AgentCore Runtime with **protocol `A2A`** and these environment variables:
+1. **Deploy** each `agents/<name>/` folder as an AgentCore Runtime with **protocol `A2A`**. First fill in `REGISTRY_ID` in the `deployed:` block of each `agent.yaml`; the framework injects that block as environment variables:
 
    | Variable | Example | Notes |
    |---|---|---|
-   | `REGISTRY_ID` | `reg-abc123…` | Required. Registry ID or ARN. |
+   | `REGISTRY_ID` | `reg-abc123…` | Required. Registry ID or ARN. Empty in the repo. |
    | `AWS_REGION` | `us-east-1` | Region of the registry and runtimes. |
    | `MODEL_ID` | `anthropic.claude-opus-5-5` | Bedrock model or inference profile ID. |
+   | `A2A_PORT` | `9000` | AgentCore requires 9000. |
 
    Attach [`iam/agent-runtime-policy.json`](iam/agent-runtime-policy.json) to each execution role. It allows searching the registry, invoking the two peer runtimes, and invoking the model. See [User Guide §3](docs/USER_GUIDE.md#3-iam-permissions).
 
@@ -91,7 +93,7 @@ Each agent folder is self-contained, with the four files your CI/CD builds:
 
    The artist prices the mural itself, then finds and asks the banker and the trainer.
 
-**Trying it before deploying?** Run all three agents on your machine in three terminals, using `LOCAL_PEER_URLS` instead of the registry. Only Bedrock is needed. See [User Guide §6.1](docs/USER_GUIDE.md#61-all-three-agents-locally-no-registry-no-agentcore).
+**Trying it before deploying?** Run all three agents on your machine in three terminals with the `local:` block of each `agent.yaml`, which uses `LOCAL_PEER_URLS` instead of the registry. Only Bedrock is needed. See [User Guide §6.1](docs/USER_GUIDE.md#61-all-three-agents-locally-no-registry-no-agentcore).
 
 The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting.
 

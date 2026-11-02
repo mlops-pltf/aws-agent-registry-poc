@@ -28,13 +28,17 @@ Your CI/CD pipeline handles deployment. For each folder under `agents/`:
 3. Create or update an AgentCore Runtime with these settings:
    - **Protocol:** `A2A`. The container serves A2A JSON-RPC on `0.0.0.0:9000/`, the health check on `/ping`, and its card on `/.well-known/agent-card.json`.
    - **Inbound auth:** IAM (SigV4). The agents call each other with SigV4-signed `InvokeAgentRuntime`, so peer runtimes must accept IAM auth.
-   - **Environment variables:**
+   - **Environment variables:** declared in each agent's `agent.yaml`, which the framework injects into the runtime. The `deployed:` block is used on AgentCore and the `local:` block on your machine (§6.1). Before deploying, **set `REGISTRY_ID`** in each `deployed:` block; it's empty in the repo.
 
-     | Variable | Required | Default | Description |
+     | Variable | `deployed:` | `local:` | Description |
      |---|---|---|---|
-     | `REGISTRY_ID` | yes | | Agent Registry ID or ARN to search |
-     | `AWS_REGION` | no | `us-east-1` | Region of the registry and peer runtimes |
-     | `MODEL_ID` | no | `anthropic.claude-opus-5-5` | Bedrock model or inference profile ID; set this to what your region uses |
+     | `REGISTRY_ID` | **required** | (not set) | Agent Registry ID or ARN to search |
+     | `LOCAL_PEER_URLS` | **must not be set** | the other two agents' URLs | Turns on local mode; takes precedence over `REGISTRY_ID` |
+     | `A2A_PORT` | `9000` | `9000` / `9001` / `9002` | Port to serve on; AgentCore requires 9000 |
+     | `AWS_REGION` | `us-east-1` | `us-east-1` | Region of the registry, runtimes and Bedrock |
+     | `MODEL_ID` | `anthropic.claude-opus-5-5` | same | Bedrock model or inference profile ID; set it to what your region uses |
+
+     The code falls back to defaults for `AWS_REGION` (`us-east-1`), `MODEL_ID` (`anthropic.claude-opus-5-5`) and `A2A_PORT` (9000), and refuses to start if neither `REGISTRY_ID` nor `LOCAL_PEER_URLS` is set.
 
 **Naming tip:** if each runtime's name contains `artist`, `investment_banker` or `fitness_trainer`, the registration script finds the runtimes automatically. Underscores and hyphens are ignored when matching.
 
@@ -200,7 +204,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r agents/artist/requirements.txt
 ```
 
-Then start each agent in its own terminal, from the repo root with the virtual environment active. Each agent gets its own port and lists the other two as peers:
+Then start each agent in its own terminal, from the repo root with the virtual environment active. Each agent's `local:` block in `agent.yaml` already gives it its own port and the other two as peers:
+
+| Agent | `A2A_PORT` | `LOCAL_PEER_URLS` |
+|---|---|---|
+| Artist | 9000 | `http://localhost:9001,http://localhost:9002` |
+| Investment Banker | 9001 | `http://localhost:9000,http://localhost:9002` |
+| Fitness Trainer | 9002 | `http://localhost:9000,http://localhost:9001` |
+
+**With your framework:** start each agent through it with the `local:` block, and set your AWS credentials (for example `AWS_PROFILE=non-prod-admin`) in the shell. `agent.yaml` doesn't set credentials.
+
+**Without the framework**, export the same values by hand:
 
 ```bash
 # Terminal 1: Artist on 9000
@@ -289,10 +303,11 @@ Search is semantic, over the record name, description and card. Specific skill d
 1. Copy an existing folder, for example `cp -r agents/fitness_trainer agents/nutritionist`.
 2. In `agent.py`, change the docstring, `AGENT_NAME`, `AGENT_DESCRIPTION`, the domain tools, the `tools=[…]` list and `agent_card.skills`. Leave the **Agent Registry discovery + A2A invocation** section as it is.
 3. Rewrite `SYSTEMPROMPT.md`. Keep the "Working with other agents" section.
-4. Add `registry-cards/nutritionist.agent-card.json`, the same card with the URL placeholder.
-5. Add `"nutritionist": "nutritionist-agent"` to `AGENTS` in `scripts/register_agents.py`.
-6. Deploy it, grant IAM, and register: `python scripts/register_agents.py --registry <id> --only nutritionist --approve`.
-7. Give the existing agents' roles `InvokeAgentRuntime` on the new runtime. **No code changes or redeploys are needed** for them; they find it on their next search.
+4. In its `agent.yaml`, give the `local:` block a free port (for example 9003) and the other agents' URLs. Add the new agent's URL to the other agents' `LOCAL_PEER_URLS`.
+5. Add `registry-cards/nutritionist.agent-card.json`, the same card with the URL placeholder.
+6. Add `"nutritionist": "nutritionist-agent"` to `AGENTS` in `scripts/register_agents.py`.
+7. Deploy it, grant IAM, and register: `python scripts/register_agents.py --registry <id> --only nutritionist --approve`.
+8. Give the existing agents' roles `InvokeAgentRuntime` on the new runtime. **No code changes or redeploys are needed** for them; they find it on their next search.
 
 ## 9. Troubleshooting
 

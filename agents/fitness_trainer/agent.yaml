@@ -1,0 +1,18 @@
+# Environment variables for Fitness Trainer Agent.
+# The framework injects the block that matches where the agent runs.
+
+# Running on your machine: peers on localhost, no Agent Registry or AgentCore.
+# The model still runs on Amazon Bedrock, so AWS credentials are needed.
+local:
+  AWS_REGION: "us-east-1"
+  MODEL_ID: "anthropic.claude-opus-5-5"
+  A2A_PORT: "9002"
+  LOCAL_PEER_URLS: "http://localhost:9000,http://localhost:9001"
+
+# Running on AgentCore Runtime: peers found through AWS Agent Registry.
+# Leave LOCAL_PEER_URLS out here; if it is set, local mode takes precedence.
+deployed:
+  AWS_REGION: "us-east-1"
+  MODEL_ID: "anthropic.claude-opus-5-5"
+  A2A_PORT: "9000"            # AgentCore A2A contract requires 9000
+  REGISTRY_ID: ""             # required: your Agent Registry ID or ARN
