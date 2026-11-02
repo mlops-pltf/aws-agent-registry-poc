@@ -10,7 +10,7 @@ Three [Strands](https://strandsagents.com) agents, each deployed as its own **Am
 
 No agent is configured with another agent's address. When a request goes beyond its own expertise, an agent searches the registry in natural language (for example "investment planning"), reads the matching agent's A2A card, and calls it. Once a fourth agent is registered and approved, the others can find it with no code changes.
 
-📊 **Presentation deck:** [Agents That Find Each Other](https://claude.ai/artifact/8X5AemdF5jSsd5TzEQb7Na), 10 slides with speaker notes covering the architecture, request flow, live demo scenario, packaging and guardrails.
+📊 **Presentation deck:** [Agents That Find Each Other](https://claude.ai/artifact/8X5AemdF5jSsd5TzEQb7Na), 11 slides with speaker notes covering the architecture, request flow, live demo scenario, packaging, running locally and guardrails.
 
 ## How it works
 
