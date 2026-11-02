@@ -5,7 +5,7 @@
 3. [IAM permissions](#3-iam-permissions)
 4. [Registering agents in Agent Registry](#4-registering-agents-in-agent-registry)
 5. [Running the demo](#5-running-the-demo)
-6. [Running an agent locally](#6-running-an-agent-locally)
+6. [Running locally](#6-running-locally)
 7. [Customising the agents](#7-customising-the-agents)
 8. [Adding a new agent](#8-adding-a-new-agent)
 9. [Troubleshooting](#9-troubleshooting)
@@ -180,9 +180,68 @@ Example A2A request body, if you call a runtime directly:
 }
 ```
 
-## 6. Running an agent locally
+## 6. Running locally
 
-You can run an agent on your machine. Calls to peers still go to the **deployed** peer runtimes, found through the registry, using your local AWS credentials.
+There are two ways to run on your machine:
+
+| Mode | Set | Peers are found | Peers are called |
+|---|---|---|---|
+| **Local** (6.1) | `LOCAL_PEER_URLS` | From each peer's `/.well-known/agent-card.json` | Plain HTTP to `localhost` |
+| **Hybrid** (6.2) | `REGISTRY_ID` | AWS Agent Registry search | Deployed runtimes through `InvokeAgentRuntime` |
+
+In both modes the model runs on **Amazon Bedrock**, so your AWS profile needs `bedrock:InvokeModel` on the model. If both variables are set, local mode wins.
+
+### 6.1 All three agents locally (no registry, no AgentCore)
+
+Install the dependencies once. They're the same for all three agents.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r agents/artist/requirements.txt
+```
+
+Then start each agent in its own terminal, from the repo root with the virtual environment active. Each agent gets its own port and lists the other two as peers:
+
+```bash
+# Terminal 1: Artist on 9000
+export AWS_PROFILE=non-prod-admin AWS_REGION=us-east-1
+A2A_PORT=9000 LOCAL_PEER_URLS=http://localhost:9001,http://localhost:9002 python agents/artist/agent.py
+
+# Terminal 2: Investment Banker on 9001
+export AWS_PROFILE=non-prod-admin AWS_REGION=us-east-1
+A2A_PORT=9001 LOCAL_PEER_URLS=http://localhost:9000,http://localhost:9002 python agents/investment_banker/agent.py
+
+# Terminal 3: Fitness Trainer on 9002
+export AWS_PROFILE=non-prod-admin AWS_REGION=us-east-1
+A2A_PORT=9002 LOCAL_PEER_URLS=http://localhost:9000,http://localhost:9001 python agents/fitness_trainer/agent.py
+```
+
+Set `MODEL_ID` too if the default isn't available in your account. On ports 9001 and 9002 the SDK logs a warning that AgentCore requires port 9000. That's expected locally and can be ignored.
+
+From a fourth terminal, check the agents and send the demo prompt to the artist:
+
+```bash
+for p in 9000 9001 9002; do curl -s localhost:$p/.well-known/agent-card.json | jq -r '"\(.name)  \(.url)"'; done
+
+curl -s -X POST localhost:9000/ -H 'Content-Type: application/json' -d '{
+  "jsonrpc": "2.0", "id": "1", "method": "message/send",
+  "params": {"message": {"role": "user", "messageId": "demo-1", "parts": [{"kind": "text",
+    "text": "I am an established muralist. I have been offered a 400 sq ft mural, about 120 hours of work. What should I charge, how should I invest the fee over 10 years, and how do I stay fit through weeks on a ladder?"}]}}}' \
+  | jq -r '.result.artifacts[].parts[].text'
+```
+
+The answer can take a minute or two, because the artist calls the other two agents. Watch the logs:
+- The artist's terminal shows `A2A -> Investment Banker Agent: …` and `A2A -> Fitness Trainer Agent: …`.
+- The banker's and trainer's terminals show the incoming requests, which start with `[A2A request from Artist Agent]`.
+
+How local mode differs from the deployed setup:
+- **Matching:** the registry's semantic search isn't available locally. `find_peer_agents` returns every reachable peer, with the best keyword match first, and the model picks which one to call.
+- **Names:** local peer names come from the card name, for example `investment-banker-agent`, the same names the registration script uses in the registry.
+- **Unreachable peers:** a peer that isn't running is skipped with a warning, so you can run just two agents.
+
+### 6.2 One agent locally, peers deployed
+
+The local agent finds its peers in the real registry and calls the **deployed** runtimes, using your local AWS credentials.
 
 ```bash
 cd agents/artist

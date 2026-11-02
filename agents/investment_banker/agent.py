@@ -7,15 +7,23 @@ hard-coded: add a new approved AGENT record to the registry and this agent can
 find and use it.
 
 Environment:
-  REGISTRY_ID   Agent Registry ID or ARN to search (required)
-  AWS_REGION    Region of the registry and runtimes (default us-east-1)
-  MODEL_ID      Bedrock model / inference profile ID
+  REGISTRY_ID      Agent Registry ID or ARN to search (required unless LOCAL_PEER_URLS is set)
+  AWS_REGION       Region of the registry and runtimes (default us-east-1)
+  MODEL_ID         Bedrock model / inference profile ID
+  A2A_PORT         Port to serve on (default 9000, which AgentCore requires)
+
+Local mode (all agents on one machine; no registry or AgentCore needed):
+  LOCAL_PEER_URLS  Comma-separated base URLs of the other agents, e.g.
+                   http://localhost:9001,http://localhost:9002. Peers are then
+                   discovered from their /.well-known/agent-card.json and called
+                   over plain HTTP. The model still runs on Bedrock.
 """
 
 import json
 import logging
 import os
 import re
+import urllib.request
 import uuid
 from pathlib import Path
 from urllib.parse import unquote
@@ -35,7 +43,10 @@ AGENT_DESCRIPTION = (
     "models growth and returns, and advises on budgets, funding and business finance."
 )
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-REGISTRY_ID = os.environ["REGISTRY_ID"]
+REGISTRY_ID = os.environ.get("REGISTRY_ID")
+LOCAL_PEER_URLS = [u.strip().rstrip("/") + "/" for u in os.environ.get("LOCAL_PEER_URLS", "").split(",") if u.strip()]
+if not REGISTRY_ID and not LOCAL_PEER_URLS:
+    raise SystemExit("Set REGISTRY_ID, or LOCAL_PEER_URLS to run in local mode.")
 MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-opus-5-5")
 SYSTEM_PROMPT = (Path(__file__).parent / "SYSTEMPROMPT.md").read_text()
 
@@ -50,7 +61,8 @@ _boto_config = Config(read_timeout=300, retries={"max_attempts": 3, "mode": "ada
 registry = boto3.client("agent-registry", region_name=REGION, config=_boto_config)
 agentcore = boto3.client("bedrock-agentcore", region_name=REGION, config=_boto_config)
 
-# record name -> {"name", "arn", "card"}; filled by find_peer_agents
+# record name -> {"name", "card", and "arn" (AgentCore) or "url" (local mode)};
+# filled by find_peer_agents
 _peers: dict[str, dict] = {}
 
 _RUNTIME_ARN = re.compile(r"arn:aws[\w-]*:bedrock-agentcore:[\w-]+:\d{12}:runtime/[\w-]+")
@@ -73,8 +85,8 @@ def _runtime_arn(record: dict, card: dict) -> str | None:
     return None
 
 
-def _send_a2a(runtime_arn: str, text: str) -> str:
-    """Send one A2A message/send JSON-RPC call to an AgentCore runtime."""
+def _send_a2a(peer: dict, text: str) -> str:
+    """Send one A2A message/send JSON-RPC call to a peer and return its text reply."""
     body = {
         "jsonrpc": "2.0",
         "id": str(uuid.uuid4()),
@@ -87,14 +99,24 @@ def _send_a2a(runtime_arn: str, text: str) -> str:
             }
         },
     }
-    response = agentcore.invoke_agent_runtime(
-        agentRuntimeArn=runtime_arn,
-        runtimeSessionId=str(uuid.uuid4()),
-        contentType="application/json",
-        accept="application/json",
-        payload=json.dumps(body).encode(),
-    )
-    reply = json.loads(response["response"].read())
+    if "url" in peer:  # local mode: plain HTTP to the peer's A2A server
+        request = urllib.request.Request(
+            peer["url"],
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=300) as response:
+            reply = json.loads(response.read())
+    else:
+        response = agentcore.invoke_agent_runtime(
+            agentRuntimeArn=peer["arn"],
+            runtimeSessionId=str(uuid.uuid4()),
+            contentType="application/json",
+            accept="application/json",
+            payload=json.dumps(body).encode(),
+        )
+        reply = json.loads(response["response"].read())
     if "error" in reply:
         raise RuntimeError(reply["error"].get("message", str(reply["error"])))
     return _extract_text(reply.get("result", {}))
@@ -121,36 +143,69 @@ def _current_request(agent: Agent) -> str:
     return ""
 
 
-@tool
-def find_peer_agents(need: str) -> str:
-    """Search AWS Agent Registry for other agents that can help with a need.
-
-    Args:
-        need: Natural-language description of the expertise required,
-            e.g. "investment planning for a creative business".
-    """
+def _registry_candidates(need: str) -> list[tuple[str, dict, dict]]:
+    """Semantic search in AWS Agent Registry -> (record name, card, address)."""
     response = registry.search_discoverable_registry_records(
         searchQuery=need,
         registryIds=[REGISTRY_ID],
         maxResults=5,
     )
-    found = []
+    candidates = []
     for record in response["registryRecords"]:
         descriptor = record.get("descriptors", {}).get("a2aAgentCard")
         if record.get("recordType") != "AGENT" or not descriptor:
             continue
         card = json.loads(descriptor["data"])
-        if card.get("name") == AGENT_NAME:
-            continue
         arn = _runtime_arn(record, card)
         if not arn:
             logger.warning("No runtime ARN for registry record %s", record["name"])
             continue
-        _peers[record["name"]] = {"name": card.get("name"), "arn": arn, "card": card}
+        candidates.append((record["name"], card, {"arn": arn}))
+    return candidates
+
+
+def _local_candidates(need: str) -> list[tuple[str, dict, dict]]:
+    """Local mode: read each peer's agent card, best keyword match first.
+
+    The registry's semantic search is not available locally, so every reachable
+    peer is returned and the model picks; the ranking just puts likely ones first.
+    """
+    words = set(re.findall(r"[a-z]{3,}", need.lower()))
+    ranked = []
+    for url in LOCAL_PEER_URLS:
+        try:
+            with urllib.request.urlopen(url + ".well-known/agent-card.json", timeout=10) as response:
+                card = json.loads(response.read())
+        except OSError as exc:
+            logger.warning("Local peer %s is not reachable: %s", url, exc)
+            continue
+        text = json.dumps([card.get("name"), card.get("description"), card.get("skills")]).lower()
+        score = sum(word in text for word in words)
+        # same names the registration script gives the registry records
+        record_name = re.sub(r"[^a-z0-9]+", "-", card.get("name", url).lower()).strip("-")
+        ranked.append((score, record_name, card, {"url": url}))
+    ranked.sort(key=lambda r: r[0], reverse=True)
+    return [(name, card, address) for _, name, card, address in ranked]
+
+
+@tool
+def find_peer_agents(need: str) -> str:
+    """Search the agent directory for other agents that can help with a need.
+
+    Args:
+        need: Natural-language description of the expertise required,
+            e.g. "investment planning for a creative business".
+    """
+    candidates = _local_candidates(need) if LOCAL_PEER_URLS else _registry_candidates(need)
+    found = []
+    for record_name, card, address in candidates:
+        if card.get("name") == AGENT_NAME:
+            continue
+        _peers[record_name] = {"name": card.get("name"), "card": card, **address}
         found.append({
-            "record_name": record["name"],
+            "record_name": record_name,
             "agent": card.get("name"),
-            "description": card.get("description") or record.get("description"),
+            "description": card.get("description"),
             "skills": [s.get("name") for s in card.get("skills", [])],
         })
     if not found:
@@ -176,7 +231,7 @@ def ask_peer_agent(record_name: str, question: str, tool_context: ToolContext) -
         return f"Unknown agent '{record_name}'. Call find_peer_agents first."
     logger.info("A2A -> %s: %s", peer["name"], question)
     try:
-        answer = _send_a2a(peer["arn"], f"{PEER_PREFIX}{AGENT_NAME}] {question}")
+        answer = _send_a2a(peer, f"{PEER_PREFIX}{AGENT_NAME}] {question}")
     except Exception as exc:  # surface failures to the model instead of crashing the turn
         logger.exception("A2A call to %s failed", peer["name"])
         return f"{peer['name']} could not be reached: {exc}"

@@ -91,6 +91,8 @@ Each agent folder is self-contained, with the four files your CI/CD builds:
 
    The artist prices the mural itself, then finds and asks the banker and the trainer.
 
+**Trying it before deploying?** Run all three agents on your machine in three terminals, using `LOCAL_PEER_URLS` instead of the registry. Only Bedrock is needed. See [User Guide §6.1](docs/USER_GUIDE.md#61-all-three-agents-locally-no-registry-no-agentcore).
+
 The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting.
 
 ## Tech stack
