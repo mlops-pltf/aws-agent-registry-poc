@@ -97,6 +97,107 @@ Each agent folder is self-contained, with the five files your CI/CD uses:
 
 The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting.
 
+## Calling an agent (A2A API)
+
+Each agent is a standard A2A JSON-RPC server, so `curl`, any A2A SDK client or the A2A Inspector can call it.
+
+### Where to send it
+
+| Where it runs | Send the request to |
+|---|---|
+| Locally | `POST http://localhost:<port>/` (port from `A2A_PORT`: 9000 / 9001 / 9002) |
+| AgentCore | The `InvokeAgentRuntime` API, or `POST https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<URL-encoded runtime ARN>/invocations/`, signed with IAM (SigV4). AgentCore forwards it to `POST /` in the container. |
+
+A2A servers have **no `/invocations` route** inside the container; that path belongs to AgentCore's HTTP protocol. The routes `serve_a2a` registers are:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/` | A2A JSON-RPC (`message/send`, `message/stream`, …) |
+| `GET` | `/.well-known/agent-card.json` | Agent card (also at `/.well-known/agent.json`) |
+| `GET` | `/ping` | Health check |
+
+### Request payload
+
+A JSON-RPC 2.0 `message/send` request (A2A protocol 0.3, matching the pinned `a2a-sdk~=0.3.26`):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "messageId": "msg-001",
+      "parts": [
+        { "kind": "text", "text": "How should I invest $30,000 over 10 years?" }
+      ]
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `jsonrpc` | yes | Always `"2.0"` |
+| `id` | yes | Any string or number; the reply echoes it back |
+| `method` | yes | `"message/send"`, or `"message/stream"` for streaming |
+| `params.message.role` | yes | `"user"` |
+| `params.message.messageId` | yes | Unique per message; a UUID works well |
+| `params.message.parts` | yes | For text: `{"kind": "text", "text": "..."}` |
+| `params.message.contextId` | no | The `contextId` from a previous reply, to continue that conversation |
+| `params.configuration` | no | For example `{"blocking": true, "historyLength": 0}` |
+| `params.metadata` | no | Any extra key–value pairs |
+
+### Response
+
+The agent replies with a **task**. The answer text is in `result.artifacts[].parts[].text`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "result": {
+    "kind": "task",
+    "id": "…",
+    "contextId": "338773e1-…",
+    "status": { "state": "completed" },
+    "artifacts": [
+      { "name": "agent_response", "parts": [ { "kind": "text", "text": "…the agent's answer…" } ] }
+    ],
+    "history": [ … ]
+  }
+}
+```
+
+If the request fails, the reply has an `error` object (`{"code": -32602, "message": "..."}`) instead of `result`.
+
+### Examples
+
+```bash
+# Local: ask the banker (port 9001) and print only the answer
+curl -s -X POST localhost:9001/ -H 'Content-Type: application/json' -d '{
+  "jsonrpc": "2.0", "id": "1", "method": "message/send",
+  "params": {"message": {"role": "user", "messageId": "msg-001",
+    "parts": [{"kind": "text", "text": "How should I invest $30,000 over 10 years?"}]}}}' \
+  | jq -r '.result.artifacts[].parts[].text'
+
+# Follow-up in the same conversation: copy contextId from the previous reply
+#   "message": {"role": "user", "messageId": "msg-002", "contextId": "<contextId>", "parts": [...]}
+
+# Streaming (server-sent events)
+curl -N -s -X POST localhost:9001/ -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"message/stream","params":{"message":{"role":"user","messageId":"msg-003","parts":[{"kind":"text","text":"Quick budget tip?"}]}}}'
+
+# AgentCore: same body, sent through InvokeAgentRuntime
+aws bedrock-agentcore invoke-agent-runtime --region us-east-1 \
+  --agent-runtime-arn "<runtime ARN>" --runtime-session-id "$(uuidgen)" \
+  --payload fileb://req.json out.json
+jq -r '.result.artifacts[].parts[].text' out.json
+```
+
+On AgentCore, `--runtime-session-id` must be at least 33 characters (`uuidgen` gives 36), and the caller needs `bedrock-agentcore:InvokeAgentRuntime` on the runtime.
+
 ## Tech stack
 
 - [Strands Agents](https://strandsagents.com) `~=1.57.2` with `StrandsA2AExecutor`
