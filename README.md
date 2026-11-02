@@ -88,11 +88,23 @@ Each agent folder is self-contained, with the five files your CI/CD uses:
    python scripts/register_agents.py --registry <registry name or ID> --approve
    ```
 
-3. **Demo:** send this to the Artist runtime:
+3. **Demo:** send this question to **any** of the three agents:
 
-   > I'm an established muralist. I've been offered a 400 sq ft mural, about 120 hours of work. What should I charge, how should I invest the fee over 10 years, and how do I stay fit through weeks on a ladder?
+   > I'm a 35-year-old freelance muralist taking home $6,000 a month, with $3,200 in fixed costs. I've been offered a 400 sq ft outdoor mural, about 120 hours of work. What should I charge for it, how much of the fee should I invest and what could that grow to in 10 years, and what training plan will keep my back and shoulders healthy through weeks of painting on a ladder?
 
-   The artist prices the mural itself, then finds and asks the banker and the trainer.
+   It needs all three areas of expertise, so whichever agent receives it answers its own part and consults the other two:
+
+   | Sent to | Answers itself | Consults |
+   |---|---|---|
+   | Artist | The price (`price_artwork`) | Banker: budget and 10-year projection. Trainer: training plan. |
+   | Investment Banker | Budget split and projection (`monthly_budget`, `project_investment`) | Artist: what to charge. Trainer: training plan. |
+   | Fitness Trainer | Training plan and calories (`weekly_plan`, `calories_burned`) | Artist: what to charge. Banker: what to invest. |
+
+   ```bash
+   python scripts/invoker.py banker "I'm a 35-year-old freelance muralist taking home \$6,000 a month, with \$3,200 in fixed costs. I've been offered a 400 sq ft outdoor mural, about 120 hours of work. What should I charge for it, how much of the fee should I invest and what could that grow to in 10 years, and what training plan will keep my back and shoulders healthy through weeks of painting on a ladder?"
+   ```
+
+   Watch the logs: the receiving agent logs `A2A -> … Agent: …` for each consultation, and each peer logs an incoming request starting with `[A2A request from …]`. The answer can take a few minutes. Whether to consult is the model's decision; if an agent answers a part itself, add "check with the other specialists" to the question.
 
 **Trying it before deploying?** Run all three agents on your machine in three terminals with the `local:` block of each `agent.yaml`, which uses `LOCAL_PEER_URLS` instead of the registry. Only Bedrock is needed. See [User Guide §6.1](docs/USER_GUIDE.md#61-all-three-agents-locally-no-registry-no-agentcore).
 
