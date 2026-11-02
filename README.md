@@ -49,6 +49,7 @@ agents/
 registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
+  invoker.py           Sends prompts to a locally running agent (CLI, stdlib only)
 iam/
   agent-runtime-policy.json   Attach to each agent's execution role
   registration-policy.json    Least-privilege role for registration
@@ -172,7 +173,28 @@ The agent replies with a **task**. The answer text is in `result.artifacts[].par
 
 If the request fails, the reply has an `error` object (`{"code": -32602, "message": "..."}`) instead of `result`.
 
-### Examples
+### From Python: `scripts/invoker.py`
+
+[`scripts/invoker.py`](scripts/invoker.py) is a standard-library CLI for agents running on localhost. It sends `message/send`, reads the answer from the task's artifacts, and handles JSON-RPC errors, failed tasks and unreachable agents.
+
+```bash
+python scripts/invoker.py banker "How should I invest \$30,000 over 10 years?"   # one question
+python scripts/invoker.py artist                                                 # interactive chat; keeps contextId
+python scripts/invoker.py --port 9002 "Build me a 3-day posture plan"            # any port
+python scripts/invoker.py trainer "Quick tip?" --raw                             # full JSON-RPC reply
+```
+
+Agent names map to the local ports in `agent.yaml`: `artist` → 9000, `banker` / `investment_banker` → 9001, `trainer` / `fitness_trainer` → 9002. Use `--url` for any other address, and `--timeout` (default 300 s) for slow answers. Works on Python 3.9+.
+
+To use it from your own code, `send_message()` returns the JSON-RPC reply and `extract_answer()` turns it into `(text, contextId)`:
+
+```python
+from invoker import send_message, extract_answer   # with scripts/ on sys.path
+
+answer, context_id = extract_answer(send_message("http://localhost:9001/", "How should I invest $30,000?"))
+```
+
+### Examples with curl and the AWS CLI
 
 ```bash
 # Local: ask the banker (port 9001) and print only the answer
