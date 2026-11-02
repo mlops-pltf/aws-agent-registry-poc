@@ -6,15 +6,13 @@ ENV PYTHONUNBUFFERED=1 \
     DOCKER_CONTAINER=1 \
     AWS_REGION=us-east-1
 
-RUN pip install \
-    "strands-agents~=1.57.2" \
-    "bedrock-agentcore[a2a,strands-agents]~=1.24.0" \
-    "a2a-sdk[all]~=0.3.26" \
-    "boto3>=1.43.107" \
-    "aws-opentelemetry-distro~=0.21.0"
-
 RUN useradd -m -u 1000 agent
 WORKDIR /app
+
+# Dependencies first so this layer is cached when only the code changes.
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
 COPY --chown=agent:agent agent.py SYSTEMPROMPT.md ./
 USER agent
 

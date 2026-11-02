@@ -43,9 +43,9 @@ Every agent has the same two networking tools:
 
 ```
 agents/
-  artist/              Dockerfile · agent.py · SYSTEMPROMPT.md
-  investment_banker/   Dockerfile · agent.py · SYSTEMPROMPT.md
-  fitness_trainer/     Dockerfile · agent.py · SYSTEMPROMPT.md
+  artist/              Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
+  investment_banker/   Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
+  fitness_trainer/     Dockerfile · requirements.txt · agent.py · SYSTEMPROMPT.md
 registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
@@ -56,11 +56,12 @@ docs/
   USER_GUIDE.md        Deploy, register, demo, extend, troubleshoot
 ```
 
-Each agent folder is self-contained, with the three files your CI/CD builds:
+Each agent folder is self-contained, with the four files your CI/CD builds:
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | `linux/arm64` image, pinned Strands / AgentCore / A2A SDKs, serves on port 9000 |
+| `Dockerfile` | `linux/arm64` image; installs `requirements.txt`, serves on port 9000 |
+| `requirements.txt` | Pinned Strands, AgentCore, A2A, boto3 and OpenTelemetry dependencies |
 | `agent.py` | AgentCore entrypoint: domain tools, peer tools, agent card, `serve_a2a` server |
 | `SYSTEMPROMPT.md` | Persona, when to consult peers, how to answer peers |
 

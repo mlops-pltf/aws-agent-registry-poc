@@ -187,8 +187,7 @@ You can run an agent on your machine. Calls to peers still go to the **deployed*
 ```bash
 cd agents/artist
 python -m venv .venv && source .venv/bin/activate
-pip install "strands-agents~=1.57.2" "bedrock-agentcore[a2a,strands-agents]~=1.24.0" \
-            "a2a-sdk[all]~=0.3.26" "boto3>=1.43.107"
+pip install -r requirements.txt
 
 export AWS_PROFILE=non-prod-admin AWS_REGION=us-east-1 REGISTRY_ID=<registry ID>
 python agent.py          # serves on http://127.0.0.1:9000
@@ -219,6 +218,7 @@ docker run --rm -p 9000:9000 -e REGISTRY_ID=<id> -e AWS_REGION=us-east-1 \
 |---|---|
 | Persona, tone, when to consult peers | `SYSTEMPROMPT.md` (read at startup; no code change) |
 | Domain tools | The **Domain tools** section of `agent.py`; add new tools to `tools=[…]` in `create_agent` |
+| Python dependencies | That agent's `requirements.txt` (the Dockerfile installs it) |
 | How the agent is described to others | `AGENT_NAME`, `AGENT_DESCRIPTION` and `agent_card.skills` in `agent.py`, **and** the matching `registry-cards/*.json`, then re-register |
 | Model | `MODEL_ID` environment variable |
 | Number of search results | `maxResults` in `find_peer_agents` |
