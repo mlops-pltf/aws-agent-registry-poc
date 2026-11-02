@@ -47,6 +47,9 @@ agents/
 registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
+iam/
+  agent-runtime-policy.json   Attach to each agent's execution role
+  registration-policy.json    Least-privilege role for registration
 docs/
   USER_GUIDE.md        Deploy, register, demo, extend, troubleshoot
 ```
@@ -68,6 +71,8 @@ Each agent folder is self-contained, with the three files your CI/CD builds:
    | `REGISTRY_ID` | `reg-abc123…` | Required. Registry ID or ARN. |
    | `AWS_REGION` | `us-east-1` | Region of the registry and runtimes. |
    | `MODEL_ID` | `anthropic.claude-opus-5-5` | Bedrock model or inference profile ID. |
+
+   Attach [`iam/agent-runtime-policy.json`](iam/agent-runtime-policy.json) to each execution role. It allows searching the registry, invoking the two peer runtimes, and invoking the model. See [User Guide §3](docs/USER_GUIDE.md#3-iam-permissions).
 
 2. **Register** the agents in the registry:
 

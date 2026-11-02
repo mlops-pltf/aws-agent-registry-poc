@@ -40,17 +40,46 @@ Your CI/CD pipeline handles deployment. For each folder under `agents/`:
 
 ## 3. IAM permissions
 
-**Each agent's execution role** needs the standard AgentCore Runtime permissions (ECR pull, CloudWatch Logs, X-Ray/OTel) plus:
+Ready-to-use policies are in [`iam/`](../iam). Replace the `<PLACEHOLDERS>` before attaching them. The action names and ARN formats come from the AWS Service Authorization Reference for [Agent Registry](https://docs.aws.amazon.com/service-authorization/latest/reference/list_agent-registry.html), [Bedrock AgentCore](https://docs.aws.amazon.com/service-authorization/latest/reference/list_bedrock-agentcore.html) and Amazon Bedrock.
 
-| Purpose | Permission | Resource |
+### 3.1 Agent execution roles: [`iam/agent-runtime-policy.json`](../iam/agent-runtime-policy.json)
+
+Attach this policy to **each** agent's AgentCore Runtime execution role, alongside the baseline AgentCore execution-role permissions your pipeline already grants (ECR pull, CloudWatch Logs, X-Ray, CloudWatch metrics, workload identity).
+
+| Statement | Action | Resource | Code that needs it |
+|---|---|---|---|
+| `DiscoverPeersInAgentRegistry` | `agent-registry:SearchDiscoverableRegistryRecords` | `arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/<REGISTRY_ID>` | `find_peer_agents` |
+| `InvokePeerAgentsOverA2A` | `bedrock-agentcore:InvokeAgentRuntime` | The **two peer** runtimes, `runtime/<ID>` **and** `runtime/<ID>/runtime-endpoint/*` | `ask_peer_agent` |
+| `InvokeClaudeOnBedrock` | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | The foundation model, plus the inference profile if `MODEL_ID` is one | Strands `BedrockModel` |
+
+Peers for each role:
+
+| Execution role of | `<PEER_1_RUNTIME_ID>` | `<PEER_2_RUNTIME_ID>` |
 |---|---|---|
-| Call the model | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` | The model or inference profile |
-| Discover peers | Agent Registry search/list/get of discoverable records | Your registry |
-| Call peers | `bedrock-agentcore:InvokeAgentRuntime` | The **other two** runtime ARNs (and their endpoints) |
+| Artist | investment banker runtime | fitness trainer runtime |
+| Investment Banker | artist runtime | fitness trainer runtime |
+| Fitness Trainer | artist runtime | investment banker runtime |
 
-Take the exact Agent Registry IAM action names from the *Service Authorization Reference* for Agent Registry. List specific runtime ARNs rather than `*`, so an agent can only call agents you've approved.
+Notes:
 
-**The registration profile** (`non-prod-admin`) needs Agent Registry record create, update, submit and status-update permissions, plus `bedrock-agentcore:ListAgentRuntimes` when the script looks up runtimes by name.
+- **Both runtime ARN forms are needed.** `InvokeAgentRuntime` authorizes against the `runtime` and `runtime-endpoint` resource types. The code calls the `DEFAULT` endpoint, which is `runtime/<ID>/runtime-endpoint/DEFAULT`.
+- **Not needed:** `bedrock-agentcore:InvokeAgentRuntimeForUser`. That applies only when a caller passes a runtime user ID, and this code doesn't. The agents also don't need `ListDiscoverableRegistryRecords` or `GetDiscoverableRegistryRecord`, because they only search.
+- **Model:** if `MODEL_ID` is a cross-region inference profile, Bedrock checks both the profile ARN and the foundation-model ARN in every region the profile routes to; the `*` region in the foundation-model ARN covers that. If you use a different model, change both ARNs.
+- **Leaving out a peer** denies that pair. For example, removing the trainer from the banker's policy means the banker can still *find* the trainer but gets `AccessDeniedException` when calling it.
+
+### 3.2 Registration profile: [`iam/registration-policy.json`](../iam/registration-policy.json)
+
+These are the permissions `scripts/register_agents.py` uses. The `non-prod-admin` profile already has them; use this policy for a least-privilege onboarding pipeline role later.
+
+| Action | Resource | Used for |
+|---|---|---|
+| `agent-registry:ListRegistries` | `*` | Resolving `--registry <name>` |
+| `bedrock-agentcore:ListAgentRuntimes` | `*` | Finding runtimes by name (not needed if you pass ARNs) |
+| `agent-registry:CreateRegistryRecord`, `agent-registry:ListRegistryRecords` | `registry/<REGISTRY_ID>` | Create, or find an existing record |
+| `agent-registry:GetRegistryRecord`, `agent-registry:UpdateRegistryRecord`, `agent-registry:SubmitRegistryRecordForApproval` | `registry/<REGISTRY_ID>/record/*` | Update, wait for status, submit |
+| `agent-registry:UpdateRegistryRecordStatus` | `registry/<REGISTRY_ID>/record/*` | Only for `--approve`. Leave it out to keep approval a separate curator step |
+
+`sts:GetCallerIdentity`, which the script uses to print the account, needs no IAM permission. The extra permissions AWS lists for `CreateRegistryRecord` and `UpdateRegistryRecord` (`iam:PassRole`, `bedrock-agentcore:GetWorkloadAccessToken`, `bedrock-agentcore:GetResourceOauth2Token`) are only for records that sync their card from an OAuth-protected URL. This script sends the card inline, so it doesn't need them.
 
 > Discovery is not authorization. The registry only returns metadata; IAM decides who can actually invoke which runtime.
 

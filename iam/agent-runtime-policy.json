@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DiscoverPeersInAgentRegistry",
+      "Effect": "Allow",
+      "Action": "agent-registry:SearchDiscoverableRegistryRecords",
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/<REGISTRY_ID>"
+    },
+    {
+      "Sid": "InvokePeerAgentsOverA2A",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:InvokeAgentRuntime",
+      "Resource": [
+        "arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/<PEER_1_RUNTIME_ID>",
+        "arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/<PEER_1_RUNTIME_ID>/runtime-endpoint/*",
+        "arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/<PEER_2_RUNTIME_ID>",
+        "arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/<PEER_2_RUNTIME_ID>/runtime-endpoint/*"
+      ]
+    },
+    {
+      "Sid": "InvokeClaudeOnBedrock",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+        "arn:aws:bedrock:<REGION>:<ACCOUNT_ID>:inference-profile/*anthropic.claude-opus-5-5*"
+      ]
+    }
+  ]
+}

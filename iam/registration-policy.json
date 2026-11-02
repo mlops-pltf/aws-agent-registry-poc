@@ -1,0 +1,39 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FindRegistryAndRuntimes",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:ListRegistries",
+        "bedrock-agentcore:ListAgentRuntimes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateAndListRecords",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:CreateRegistryRecord",
+        "agent-registry:ListRegistryRecords"
+      ],
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/<REGISTRY_ID>"
+    },
+    {
+      "Sid": "ManageRecordLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:GetRegistryRecord",
+        "agent-registry:UpdateRegistryRecord",
+        "agent-registry:SubmitRegistryRecordForApproval"
+      ],
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/<REGISTRY_ID>/record/*"
+    },
+    {
+      "Sid": "ApproveRecordsOnlyNeededForApproveFlag",
+      "Effect": "Allow",
+      "Action": "agent-registry:UpdateRegistryRecordStatus",
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/<REGISTRY_ID>/record/*"
+    }
+  ]
+}
