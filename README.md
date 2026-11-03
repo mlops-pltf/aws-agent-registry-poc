@@ -110,6 +110,120 @@ Each agent folder is self-contained, with the five files your CI/CD uses:
 
 The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting.
 
+## Registering agents in Agent Registry
+
+Agents find each other only through **approved** `AGENT` records in AWS Agent Registry. Each record holds the agent's A2A card, and the card's `url` tells callers which AgentCore runtime to invoke. Register each agent once after its runtime is deployed, and again whenever its runtime ARN or card changes.
+
+### The record
+
+| Field | Value |
+|---|---|
+| Record type | `AGENT` |
+| Name | `artist-agent`, `investment-banker-agent`, `fitness-trainer-agent` (agents pass this name to `ask_peer_agent`) |
+| Descriptor | `a2aAgentCard`, `dataSchemaVersion` `"0.3"` |
+| Card `url` | `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<URL-encoded runtime ARN>/invocations/` |
+| Status | Must be `APPROVED`; search only returns approved records |
+
+The URL matters: `find_peer_agents` reads the runtime ARN from it and `ask_peer_agent` invokes that ARN. If the URL is wrong, the agent is still *found*, but calling it fails.
+
+### Sample agent card
+
+The Artist's card as stored in the registry, for an example runtime ARN `arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/artist_agent-AbC123XyZ9`:
+
+```json
+{
+  "name": "Artist Agent",
+  "description": "Visual artist and creative director. Designs artwork concepts, murals, brand visuals and exhibitions, and prices commissioned artwork.",
+  "url": "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A123456789012%3Aruntime%2Fartist_agent-AbC123XyZ9/invocations/",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "preferredTransport": "JSONRPC",
+  "capabilities": { "streaming": true },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "art-concept",
+      "name": "Artwork and visual concept design",
+      "description": "Designs murals, exhibitions, brand visuals and artwork concepts.",
+      "tags": ["art", "design", "creative", "branding", "mural", "exhibition"]
+    },
+    {
+      "id": "art-pricing",
+      "name": "Artwork pricing",
+      "description": "Estimates commission prices for artwork by medium, size and effort.",
+      "tags": ["art", "pricing", "commission"]
+    }
+  ]
+}
+```
+
+- **`url`:** the runtime ARN, URL-encoded with no characters left unencoded (`:` → `%3A`, `/` → `%2F`). To encode your own:
+  `python3 -c "from urllib.parse import quote; print(quote('<runtime ARN>', safe=''))"`
+- **`name`, `description` and `skills`:** these are what registry search matches against, so make them specific; tags help too.
+- **Templates:** the cards for all three agents are in [`registry-cards/`](registry-cards), with `<REGION>` and `<URL_ENCODED_RUNTIME_ARN>` placeholders in `url`. They match the `agent_card` in each `agent.py`; if you change one, change the other.
+
+### Option A: `scripts/register_agents.py` (recommended)
+
+Creates or updates all three records from `registry-cards/`, fills in each runtime URL, submits the records for approval and, with `--approve`, approves them. Running it again updates the records in place, so it never creates duplicates.
+
+```bash
+pip install -U boto3   # needs the agent-registry-control client (boto3 >= 1.43.107)
+
+# Preview: prints the account, resolved runtime ARNs and final cards. Changes nothing.
+python scripts/register_agents.py --registry <registry name or ID> --dry-run
+
+# Register and approve all three
+python scripts/register_agents.py --registry <registry name or ID> --approve
+
+# Runtime names that don't contain artist / investment_banker / fitness_trainer
+python scripts/register_agents.py --registry <registry> --approve \
+  --runtime artist=arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/artist_agent-AbC123XyZ9 \
+  --runtime investment_banker=<runtime name or ARN> \
+  --runtime fitness_trainer=<runtime name or ARN>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--registry` | (required) | Registry ID, ARN or name |
+| `--profile` | `non-prod-admin` | AWS profile |
+| `--region` | `us-east-1` | AWS region |
+| `--runtime AGENT=ARN_OR_NAME` | auto-detect by name | Set an agent's runtime explicitly; repeatable |
+| `--only AGENT` | all three | Register only these agents; repeatable |
+| `--approve` | off | Also approve records left in `PENDING_APPROVAL` |
+| `--dry-run` | off | Show what would be registered and stop |
+
+For each agent the script:
+1. Finds the runtime ARN.
+2. Fills the card's `url`.
+3. Creates the record, or updates the existing one.
+4. Waits while it's `CREATING` or `UPDATING`.
+5. Submits a `DRAFT` for approval, and approves it if you passed `--approve`.
+
+The permissions it needs are in [`iam/registration-policy.json`](iam/registration-policy.json).
+
+### Option B: AWS console
+
+1. Copy `registry-cards/<agent>.agent-card.json` and replace `<REGION>` and `<URL_ENCODED_RUNTIME_ARN>` in `url` (see the sample above).
+2. In your registry, create a record:
+   - **Record type:** Agent
+   - **Descriptor:** A2A Agent Card, schema 0.3
+   - **Card:** paste the JSON
+   - **Name:** for example `artist-agent`
+3. Submit the record for approval and approve it.
+4. Check it: search for "investment planning" and confirm the banker's record comes back.
+
+### When to register again
+
+| Change | Action |
+|---|---|
+| Runtime updated in place (same ARN) | Nothing |
+| New runtime created (new ARN) | Re-run the script, or update the card's `url` |
+| Agent's skills or description changed | Update `registry-cards/` and `agent_card` in `agent.py`, then re-run |
+| Agent retired | Set its record to `DEPRECATED` so it's no longer found |
+
+Local mode (`LOCAL_PEER_URLS`) doesn't use the registry, so you don't need to register anything to run the agents locally.
+
 ## Calling an agent (A2A API)
 
 Each agent is a standard A2A JSON-RPC server, so `curl`, any A2A SDK client or the A2A Inspector can call it.
