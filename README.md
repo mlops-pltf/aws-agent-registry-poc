@@ -50,8 +50,10 @@ registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
   invoker.py           Sends prompts to a locally running agent (CLI, stdlib only)
+migration/
+  a2a_bridge.py        One file to bring an existing entrypoint agent into the network
 examples/
-  http_entrypoint_agent/   @a2a_compatible decorator + example entrypoint agent callable by our A2A agents
+  http_entrypoint_agent/   Example existing agent using a2a_bridge (callable by, and calling, our agents)
 iam/
   agent-runtime-policy.json   Attach to each agent's execution role
   registration-policy.json    Least-privilege role for registration
@@ -230,12 +232,23 @@ Local mode (`LOCAL_PEER_URLS`) doesn't use the registry, so you don't need to re
 
 An agent served as a normal AgentCore entrypoint (`BedrockAgentCoreApp` with `@app.entrypoint`, HTTP protocol, `POST /invocations` on port 8080) **can be registered with an A2A card, but registering alone isn't enough**. The registry checks the card's format, not whether the runtime actually speaks A2A. Our agents send it an A2A `message/send` JSON-RPC request through `InvokeAgentRuntime`, and AgentCore passes that body to the entrypoint unchanged as `payload`. Unless the entrypoint answers in A2A format, `ask_peer_agent` gets no answer text.
 
+### `migration/a2a_bridge.py`
+
+[`migration/a2a_bridge.py`](migration/a2a_bridge.py) is one standalone file that brings such an agent into the network. Copy it next to your agent, and into its image. It provides:
+
+| | What it does |
+|---|---|
+| `@a2a_compatible` | Lets the other agents **call** yours, without changing your entrypoint |
+| `PEER_TOOLS` + `configure()` | Let yours **call** the other agents: `find_peer_agents` and `ask_peer_agent`, with the loop guard, registry mode and local mode |
+
+The step-by-step guide is in [User Guide §9](docs/USER_GUIDE.md#9-bringing-in-an-existing-non-a2a-agent).
+
 ### The `@a2a_compatible` decorator
 
-[`examples/http_entrypoint_agent/a2a_adapter.py`](examples/http_entrypoint_agent/a2a_adapter.py) fixes this without changing your entrypoint. Copy the file next to your agent and add one decorator **below** `@app.entrypoint`:
+Add one decorator **below** `@app.entrypoint`:
 
 ```python
-from a2a_adapter import a2a_compatible
+from a2a_bridge import a2a_compatible
 
 @app.entrypoint
 @a2a_compatible                 # the only line added
@@ -267,7 +280,25 @@ If your payload or return shape differs, pass options:
 
 Errors come back as JSON-RPC errors: `-32601` for A2A methods other than `message/send`, `-32602` for a message with no text, and `-32603` if your entrypoint raises (the exception is logged).
 
-[`examples/http_entrypoint_agent/agent.py`](examples/http_entrypoint_agent/agent.py) is a complete example: a Nutritionist agent with an ordinary `{"prompt": ...}` entrypoint plus the decorator.
+### Letting it call other agents
+
+```python
+from a2a_bridge import PEER_TOOLS, a2a_compatible, configure
+
+configure(agent_name="Nutritionist Agent")   # must equal "name" in its registry card
+
+@app.entrypoint
+@a2a_compatible
+def invoke(payload, context):
+    agent = Agent(..., tools=[*your_tools, *PEER_TOOLS])
+    return {"result": str(agent(payload["prompt"]))}   # pass the prompt unchanged
+```
+
+Set `REGISTRY_ID` (or `LOCAL_PEER_URLS` locally), give its role the registry-search and `InvokeAgentRuntime` permissions, and add a "Working with other agents" section to its system prompt (§9.2 in the guide).
+
+**Pass the prompt to the agent unchanged.** The loop guard recognises peer requests by the `[A2A request from …]` prefix at the start of the prompt. Put extra instructions in the system prompt or after the prompt text, never before it.
+
+[`examples/http_entrypoint_agent/agent.py`](examples/http_entrypoint_agent/agent.py) is a complete example: a Nutritionist agent with an ordinary `{"prompt": ...}` entrypoint that uses both.
 
 **To bring it into the setup:**
 
@@ -278,8 +309,7 @@ Errors come back as JSON-RPC errors: `-32601` for A2A methods other than `messag
 **Limits compared with `serve_a2a`:**
 - **Only `message/send`.** No A2A streaming (`message/stream`) or `tasks/get`, which is why the card sets `"streaming": false`. Your own callers can still stream.
 - **No card at `/.well-known/agent-card.json`.** Callers get the card from the registry, as ours do; A2A clients that fetch the card from the runtime won't work.
-- **No local mode.** `LOCAL_PEER_URLS` posts to `/`, but this app only has `/invocations`.
-- **The loop guard is up to you.** If you give this agent peer tools, honour the `[A2A request from …]` prefix like `ask_peer_agent` does.
+- **Peers can't call it in local mode** (no `/` route), though it can call them with `LOCAL_PEER_URLS`.
 
 If the agent is yours to change, moving it to `serve_a2a` (like the three agents here) gives it the full A2A protocol.
 
