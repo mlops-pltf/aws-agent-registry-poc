@@ -51,7 +51,7 @@ scripts/
   register_agents.py   Creates/updates/approves the AGENT records
   invoker.py           Sends prompts to a locally running agent (CLI, stdlib only)
 examples/
-  http_entrypoint_agent/   A normal AgentCore entrypoint agent made callable by our A2A agents
+  http_entrypoint_agent/   @a2a_compatible decorator + example entrypoint agent callable by our A2A agents
 iam/
   agent-runtime-policy.json   Attach to each agent's execution role
   registration-policy.json    Least-privilege role for registration
@@ -230,19 +230,44 @@ Local mode (`LOCAL_PEER_URLS`) doesn't use the registry, so you don't need to re
 
 An agent served as a normal AgentCore entrypoint (`BedrockAgentCoreApp` with `@app.entrypoint`, HTTP protocol, `POST /invocations` on port 8080) **can be registered with an A2A card, but registering alone isn't enough**. The registry checks the card's format, not whether the runtime actually speaks A2A. Our agents send it an A2A `message/send` JSON-RPC request through `InvokeAgentRuntime`, and AgentCore passes that body to the entrypoint unchanged as `payload`. Unless the entrypoint answers in A2A format, `ask_peer_agent` gets no answer text.
 
-[`examples/http_entrypoint_agent/agent.py`](examples/http_entrypoint_agent/agent.py) shows the fix. It's a Nutritionist agent whose entrypoint handles A2A requests and still serves its existing callers:
+### The `@a2a_compatible` decorator
+
+[`examples/http_entrypoint_agent/a2a_adapter.py`](examples/http_entrypoint_agent/a2a_adapter.py) fixes this without changing your entrypoint. Copy the file next to your agent and add one decorator **below** `@app.entrypoint`:
 
 ```python
+from a2a_adapter import a2a_compatible
+
 @app.entrypoint
-def invoke(payload: dict) -> dict:
-    if payload.get("jsonrpc") == "2.0":  # A2A caller, e.g. ask_peer_agent in our agents
-        return handle_a2a(payload)
-    return {"result": run_agent(payload.get("prompt", ""))}  # existing callers, unchanged
+@a2a_compatible                 # the only line added
+def invoke(payload, context):   # unchanged: still receives {"prompt": "..."}
+    ...
+    return {"result": answer}
 ```
 
-`handle_a2a` reads the text from `params.message.parts`, runs the agent, and returns an A2A Message result (`{"jsonrpc": "2.0", "id": …, "result": {"kind": "message", "parts": [{"kind": "text", "text": …}]}}`). It returns JSON-RPC errors for other methods (`-32601`), for a message with no text (`-32602`), and when the agent fails (`-32603`).
+For an A2A `message/send` request, the decorator:
+1. Joins the text parts of `params.message` into one string.
+2. Calls your function with `{"prompt": <text>}`.
+3. Wraps what it returns in an A2A Message result: `{"jsonrpc": "2.0", "id": …, "result": {"kind": "message", "parts": [{"kind": "text", "text": …}]}}`.
 
-To port your own agent, copy `handle_a2a` and `_a2a_error`, add the `jsonrpc` branch to your entrypoint, and point `run_agent` at your agent.
+Any other payload, such as `{"prompt": ...}`, goes to your function untouched, so existing callers are unaffected.
+
+| Your entrypoint | Supported |
+|---|---|
+| Sync or `async def` | Yes |
+| With or without the `context` argument | Yes; the SDK still passes `context` |
+| Streaming (sync or async generator) | Yes: A2A calls get the chunks joined into one answer (plain strings, or Strands events with a `data` text delta); other callers still stream |
+| Returns a `str`, a dict, or a Strands `AgentResult` | Yes. For a dict, the answer is the first of `result`, `response`, `output`, `answer`, `text`, `message` or `content` that's present |
+
+If your payload or return shape differs, pass options:
+```python
+@a2a_compatible(prompt_key="input")                                   # payload key isn't "prompt"
+@a2a_compatible(build_payload=lambda text, req: {"prompt": text, "user": "a2a"})
+@a2a_compatible(extract_answer=lambda result: result["output"]["text"])
+```
+
+Errors come back as JSON-RPC errors: `-32601` for A2A methods other than `message/send`, `-32602` for a message with no text, and `-32603` if your entrypoint raises (the exception is logged).
+
+[`examples/http_entrypoint_agent/agent.py`](examples/http_entrypoint_agent/agent.py) is a complete example: a Nutritionist agent with an ordinary `{"prompt": ...}` entrypoint plus the decorator.
 
 **To bring it into the setup:**
 
@@ -251,7 +276,7 @@ To port your own agent, copy `handle_a2a` and `_a2a_error`, add the `jsonrpc` br
 3. **Grant** each calling agent's role `bedrock-agentcore:InvokeAgentRuntime` on the new runtime (both ARN forms, as in [`iam/agent-runtime-policy.json`](iam/agent-runtime-policy.json)). The existing agents need no code change: they find it on their next registry search.
 
 **Limits compared with `serve_a2a`:**
-- **Only `message/send`.** No streaming or `tasks/get`, which is why the card sets `"streaming": false`.
+- **Only `message/send`.** No A2A streaming (`message/stream`) or `tasks/get`, which is why the card sets `"streaming": false`. Your own callers can still stream.
 - **No card at `/.well-known/agent-card.json`.** Callers get the card from the registry, as ours do; A2A clients that fetch the card from the runtime won't work.
 - **No local mode.** `LOCAL_PEER_URLS` posts to `/`, but this app only has `/invocations`.
 - **The loop guard is up to you.** If you give this agent peer tools, honour the `[A2A request from …]` prefix like `ask_peer_agent` does.
