@@ -50,6 +50,8 @@ registry-cards/        A2A agent cards (URL placeholder) for registration
 scripts/
   register_agents.py   Creates/updates/approves the AGENT records
   invoker.py           Sends prompts to a locally running agent (CLI, stdlib only)
+examples/
+  http_entrypoint_agent/   A normal AgentCore entrypoint agent made callable by our A2A agents
 iam/
   agent-runtime-policy.json   Attach to each agent's execution role
   registration-policy.json    Least-privilege role for registration
@@ -223,6 +225,38 @@ The permissions it needs are in [`iam/registration-policy.json`](iam/registratio
 | Agent retired | Set its record to `DEPRECATED` so it's no longer found |
 
 Local mode (`LOCAL_PEER_URLS`) doesn't use the registry, so you don't need to register anything to run the agents locally.
+
+## Bringing in a non-A2A agent
+
+An agent served as a normal AgentCore entrypoint (`BedrockAgentCoreApp` with `@app.entrypoint`, HTTP protocol, `POST /invocations` on port 8080) **can be registered with an A2A card, but registering alone isn't enough**. The registry checks the card's format, not whether the runtime actually speaks A2A. Our agents send it an A2A `message/send` JSON-RPC request through `InvokeAgentRuntime`, and AgentCore passes that body to the entrypoint unchanged as `payload`. Unless the entrypoint answers in A2A format, `ask_peer_agent` gets no answer text.
+
+[`examples/http_entrypoint_agent/agent.py`](examples/http_entrypoint_agent/agent.py) shows the fix. It's a Nutritionist agent whose entrypoint handles A2A requests and still serves its existing callers:
+
+```python
+@app.entrypoint
+def invoke(payload: dict) -> dict:
+    if payload.get("jsonrpc") == "2.0":  # A2A caller, e.g. ask_peer_agent in our agents
+        return handle_a2a(payload)
+    return {"result": run_agent(payload.get("prompt", ""))}  # existing callers, unchanged
+```
+
+`handle_a2a` reads the text from `params.message.parts`, runs the agent, and returns an A2A Message result (`{"jsonrpc": "2.0", "id": …, "result": {"kind": "message", "parts": [{"kind": "text", "text": …}]}}`). It returns JSON-RPC errors for other methods (`-32601`), for a message with no text (`-32602`), and when the agent fails (`-32603`).
+
+To port your own agent, copy `handle_a2a` and `_a2a_error`, add the `jsonrpc` branch to your entrypoint, and point `run_agent` at your agent.
+
+**To bring it into the setup:**
+
+1. **Deploy** it as usual: HTTP protocol, port 8080 (`app.run()`), no `serve_a2a`. Its runtime is invoked through the same `/runtimes/<ARN>/invocations/` URL as A2A runtimes, so our agents read the ARN from its card the same way.
+2. **Register** it with an A2A card, using the template [`examples/http_entrypoint_agent/agent-card.json`](examples/http_entrypoint_agent/agent-card.json) and filling in `url` as for the others. To use the script, copy the card to `registry-cards/nutritionist.agent-card.json` and add `"nutritionist": "nutritionist-agent"` to `AGENTS` in `scripts/register_agents.py`.
+3. **Grant** each calling agent's role `bedrock-agentcore:InvokeAgentRuntime` on the new runtime (both ARN forms, as in [`iam/agent-runtime-policy.json`](iam/agent-runtime-policy.json)). The existing agents need no code change: they find it on their next registry search.
+
+**Limits compared with `serve_a2a`:**
+- **Only `message/send`.** No streaming or `tasks/get`, which is why the card sets `"streaming": false`.
+- **No card at `/.well-known/agent-card.json`.** Callers get the card from the registry, as ours do; A2A clients that fetch the card from the runtime won't work.
+- **No local mode.** `LOCAL_PEER_URLS` posts to `/`, but this app only has `/invocations`.
+- **The loop guard is up to you.** If you give this agent peer tools, honour the `[A2A request from …]` prefix like `ask_peer_agent` does.
+
+If the agent is yours to change, moving it to `serve_a2a` (like the three agents here) gives it the full A2A protocol.
 
 ## Calling an agent (A2A API)
 

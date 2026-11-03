@@ -1,0 +1,32 @@
+{
+  "name": "Nutritionist Agent",
+  "description": "Registered nutritionist. Gives practical advice on meals, hydration and energy for demanding jobs, training and recovery.",
+  "url": "https://bedrock-agentcore.<REGION>.amazonaws.com/runtimes/<URL_ENCODED_RUNTIME_ARN>/invocations/",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "preferredTransport": "JSONRPC",
+  "capabilities": {
+    "streaming": false
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "nutrition-planning",
+      "name": "Nutrition and meal planning",
+      "description": "Plans meals, snacks and hydration around work demands, training and recovery.",
+      "tags": [
+        "nutrition",
+        "diet",
+        "meals",
+        "hydration",
+        "energy",
+        "health"
+      ]
+    }
+  ]
+}
