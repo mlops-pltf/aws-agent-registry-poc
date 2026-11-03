@@ -1,5 +1,7 @@
 """A2A bridge: bring an existing AgentCore entrypoint agent into the agent network.
 
+Full guide: docs/A2A_ONBOARDING_GUIDE.md in the aws-agent-registry-poc repository.
+
 One self-contained file. Copy it next to your agent's entrypoint and use the
 parts you need:
 

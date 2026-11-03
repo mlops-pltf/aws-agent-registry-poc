@@ -312,155 +312,16 @@ Search is semantic, over the record name, description and card. Specific skill d
 
 ## 9. Bringing in an existing (non-A2A) agent
 
-This section is for agents that already run on AgentCore as a **normal entrypoint**: `BedrockAgentCoreApp` with `@app.entrypoint`, HTTP protocol, `POST /invocations` on port 8080, taking a payload such as `{"prompt": "..."}`.
+Agents that already run on AgentCore as a **normal entrypoint** (`BedrockAgentCoreApp` with `@app.entrypoint`, taking `{"prompt": "..."}`) can join the network without a rewrite, using one file, [`migration/a2a_bridge.py`](../migration/a2a_bridge.py):
 
-Everything you need is in one file, [`migration/a2a_bridge.py`](../migration/a2a_bridge.py). Copy it next to your agent's entrypoint, and make sure it ends up in the image, for example `COPY a2a_bridge.py ./` in the Dockerfile. It covers two independent steps:
-
-| Goal | From `a2a_bridge` | Section |
-|---|---|---|
-| **Other agents can call it** | `@a2a_compatible` decorator, plus registering an A2A card | 9.1 |
-| **It can call other agents** | `PEER_TOOLS` (`find_peer_agents`, `ask_peer_agent`) and `configure()` | 9.2 |
-
-You can do either step or both. Neither changes how the agent's existing callers use it.
-
-[`examples/http_entrypoint_agent/agent.py`](../examples/http_entrypoint_agent/agent.py) is a complete agent that does both.
-
-**Requirements:** Python 3.9+. The decorator only uses the standard library. The peer tools also need `strands-agents` and `boto3>=1.43.107`, for the `agent-registry` client. Without Strands installed, the decorator still works and `PEER_TOOLS` is empty.
-
-### 9.1 Let other agents call it
-
-Our agents send peers an A2A `message/send` JSON-RPC request. A normal entrypoint receives that as its `payload` and doesn't understand it, so registering the card alone isn't enough.
-
-1. **Add the decorator** below `@app.entrypoint`. Don't change the function itself:
-   ```python
-   from a2a_bridge import a2a_compatible
-
-   @app.entrypoint
-   @a2a_compatible                 # the only line added
-   def invoke(payload, context):   # still receives {"prompt": "..."}
-       ...
-   ```
-   For an A2A request, the decorator joins the message's text parts, calls your function with `{"prompt": <text>}`, and wraps the return value as an A2A reply. Every other payload passes through unchanged, so existing callers keep working, including streaming ones.
-
-   | Your entrypoint | Supported |
-   |---|---|
-   | Sync or `async def` | Yes |
-   | With or without `context` | Yes; the SDK still passes it |
-   | Streaming (sync or async generator) | Yes: A2A calls get the chunks joined; other callers still stream |
-   | Returns a `str`, a dict or a Strands `AgentResult` | Yes. For a dict, the answer is the first of `result`, `response`, `output`, `answer`, `text`, `message` or `content` that's present |
-
-2. **If the answer isn't under one of those keys, say where it is.** Otherwise the peer gets the wrong field. For example, an entrypoint returning `{"status": ..., "agent": ..., "message": "Request processed successfully", "finding": ...}` would send back "Request processed successfully". Point the decorator at `finding`, and report failures as text so the caller knows why:
-   ```python
-   import json
-
-   def answer_from(result: dict) -> str:
-       finding = result.get("finding")
-       if finding:  # only present when the execution succeeded
-           return finding if isinstance(finding, str) else json.dumps(finding, indent=2, default=str)
-       return f"No finding (status: {result.get('status')}): {result.get('message')}"
-
-   @app.entrypoint
-   @a2a_compatible(extract_answer=answer_from)
-   def invoke(payload, context):
-       ...
-   ```
-   The other options are `prompt_key="input"`, if your payload key isn't `prompt`, and `build_payload=lambda text, request: {...}` for other payload shapes.
-
-   Errors come back as JSON-RPC errors: `-32601` for A2A methods other than `message/send`, `-32602` for a message with no text, and `-32603` if your entrypoint raises (the exception is logged).
-
-3. **Write its agent card.** Start from [`examples/http_entrypoint_agent/agent-card.json`](../examples/http_entrypoint_agent/agent-card.json) and set:
-   - **`name`:** this becomes the agent's identity for the others; it must match `agent_name` in 9.2.
-   - **`description` and `skills`:** registry search matches on these, so be specific.
-   - **`url`:** `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<URL-encoded runtime ARN>/invocations/`. This is the same URL form as A2A runtimes, so callers read the ARN from it the same way.
-   - **`"capabilities": {"streaming": false}`:** keep this.
-4. **Register** the card as an `AGENT` record and approve it (§4), using the console, or the script after copying the card to `registry-cards/<key>.agent-card.json` and adding the key to `AGENTS` in `scripts/register_agents.py`.
-5. **Grant callers access:** every agent that should be able to call it needs `bedrock-agentcore:InvokeAgentRuntime` on its runtime, both `runtime/<ID>` and `runtime/<ID>/runtime-endpoint/*` (§3.1).
-
-The agents already deployed need no code change; they find the new agent on their next registry search.
-
-### 9.2 Let it call other agents
-
-**Step 1: configure and add the tools.**
-```python
-from a2a_bridge import PEER_TOOLS, a2a_compatible, configure
-
-configure(agent_name="Nutritionist Agent")  # MUST equal "name" in this agent's registry card
-
-@app.entrypoint
-@a2a_compatible
-def invoke(payload, context):
-    agent = Agent(..., tools=[*your_tools, *PEER_TOOLS])
-    result = agent(payload["prompt"])         # pass the prompt UNCHANGED (step 5)
-    return {"result": str(result)}
-```
-- **`agent_name` must match the card's `name` exactly.** `find_peer_agents` uses it to skip the agent's own record, and it appears in the `[A2A request from …]` prefix the peers see. With a mismatch, the agent can find, and call, itself.
-- **`configure()` is optional.** It overrides the environment variables `AGENT_NAME`, `REGISTRY_ID`, `LOCAL_PEER_URLS` and `AWS_REGION`, and also takes `max_results` (default 5).
-- **Missing configuration doesn't stop the agent.** With neither `REGISTRY_ID` nor `LOCAL_PEER_URLS`, `find_peer_agents` tells the model "No peer directory configured" instead.
-- **Agents that don't use Strands tools** can call `search_peers(need)` and `call_peer(record_name, question)` directly. Use `is_peer_request(text)` to apply the loop guard yourself.
-
-**Step 2: system prompt.** Add a "Working with other agents" section, like ours. Without it the model rarely uses the tools, or uses them for questions it could answer itself:
-```text
-When part of a request is outside <your area> (<other areas>), call find_peer_agents
-with a plain description of the expertise you need, then ask_peer_agent with a
-self-contained question that includes every number and fact the peer needs.
-
-If a message starts with [A2A request from …], another agent is asking you.
-Answer it directly and concisely. Do not consult further agents for it.
-```
-
-**Step 3: environment.**
-
-| Where | Set |
+| Goal | From `a2a_bridge` |
 |---|---|
-| Deployed | `REGISTRY_ID`, plus `AWS_REGION` if not `us-east-1` |
-| Locally | `LOCAL_PEER_URLS` with the agents it should call, e.g. `http://localhost:9000,http://localhost:9001` |
+| Other agents can call it | `@a2a_compatible` decorator below `@app.entrypoint`; existing callers are unaffected |
+| It can call other agents | `PEER_TOOLS` (`find_peer_agents`, `ask_peer_agent`) and `configure(agent_name=...)` |
 
-**Step 4: IAM.** Add to the agent's execution role (§3.1 has the full policy):
-- `agent-registry:SearchDiscoverableRegistryRecords` on the registry.
-- `bedrock-agentcore:InvokeAgentRuntime` on each runtime it may call (both ARN forms).
+**The full step-by-step guide is [A2A Onboarding Guide](A2A_ONBOARDING_GUIDE.md).** It covers adding the file, choosing the answer field (`extract_answer`), the system prompt, configuration, IAM, the agent card and registration, testing, limits and troubleshooting.
 
-**Step 5: pass the prompt to the agent unchanged.** This is the one rule that keeps the loop guard working. `ask_peer_agent` refuses to call further agents when the user message being handled **starts with** `[A2A request from …]`. The decorator passes that prefix through in `payload["prompt"]`, so the guard works as long as the entrypoint hands the prompt to the agent as-is:
-
-```python
-result = agent(payload["prompt"])                       # ✅ guard works
-# result = agent(f"User asks: {payload['prompt']}")     # ❌ guard bypassed: loops possible
-# result = agent(payload["prompt"] + "\nBe concise.")   # ✅ fine: text added after the prompt
-```
-
-| Request | `ask_peer_agent` |
-|---|---|
-| From a user (`{"prompt": ...}`) | Allowed |
-| From a peer, prompt passed unchanged | Blocked: "this request came from another agent" |
-| From a peer, prompt prefixed by the entrypoint | **Not blocked** |
-
-To add instructions, put them in the system prompt or **after** the prompt text, never before it.
-
-**What it handles for you:**
-- **Local peers that aren't usable** are skipped with a warning: a peer that's down, a peer that answers with something other than JSON, or a malformed URL such as a missing `/` before `.well-known`.
-- **Registry records with invalid cards,** or with a URL that doesn't contain a runtime ARN, are skipped.
-- **Registry errors** (for example `AccessDenied`) and failed peer calls are returned to the model as text instead of crashing the request.
-
-### 9.3 Checking it works
-
-1. **Configuration:** ask it something that needs another agent. If `find_peer_agents` answers "No peer directory configured", set `REGISTRY_ID` (or `LOCAL_PEER_URLS` locally).
-2. **It can be found:** run `python scripts/register_agents.py --registry <id> --dry-run`, or search in the console, and confirm the record is `APPROVED`.
-3. **Others can call it:** send one of our agents a question in this agent's area. Its log shows `A2A -> <your agent's name>: …`, and the answer credits it.
-4. **It can call others:** send it a `{"prompt": ...}` question that needs another agent's expertise. Its log shows `A2A -> …` lines, and the peers' logs show `[A2A request from <your agent's name>]`.
-5. **No loops:** when a peer asks it a question, its log should show **no** `A2A ->` line for that request.
-
-### 9.4 What it can't do (compared with `serve_a2a`)
-
-| | Decorated entrypoint | `serve_a2a` agent |
-|---|---|---|
-| Called by our agents (`message/send`) | ✅ | ✅ |
-| Calls other agents (with 9.2) | ✅ | ✅ |
-| A2A streaming (`message/stream`), `tasks/get` | ❌ (JSON-RPC `-32601`) | ✅ |
-| Serves `/.well-known/agent-card.json` | ❌ (card lives only in the registry) | ✅ |
-| Called by peers in local mode | ❌ (no `/` route) | ✅ |
-| Calls peers in local mode | ✅ | ✅ |
-| Existing `{"prompt": ...}` callers | ✅ unchanged | n/a |
-
-If the agent is yours to change and you need any of the ❌ rows, move it to `serve_a2a` like the three agents in `agents/`.
+[`examples/http_entrypoint_agent/`](../examples/http_entrypoint_agent) is a complete example.
 
 ## 10. Troubleshooting
 

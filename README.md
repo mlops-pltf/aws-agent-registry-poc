@@ -59,6 +59,7 @@ iam/
   registration-policy.json    Least-privilege role for registration
 docs/
   USER_GUIDE.md        Deploy, register, demo, extend, troubleshoot
+  A2A_ONBOARDING_GUIDE.md   Bring an existing entrypoint agent into the network with a2a_bridge
 ```
 
 Each agent folder is self-contained, with the five files your CI/CD uses:
@@ -112,7 +113,7 @@ Each agent folder is self-contained, with the five files your CI/CD uses:
 
 **Trying it before deploying?** Run all three agents on your machine in three terminals with the `local:` block of each `agent.yaml`, which uses `LOCAL_PEER_URLS` instead of the registry. Only Bedrock is needed. See [User Guide §6.1](docs/USER_GUIDE.md#61-all-three-agents-locally-no-registry-no-agentcore).
 
-The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting.
+The [User Guide](docs/USER_GUIDE.md) covers IAM, manual console registration, local testing, adding new agents, and troubleshooting. To bring in an existing (non-A2A) agent, see the [A2A Onboarding Guide](docs/A2A_ONBOARDING_GUIDE.md).
 
 ## Registering agents in Agent Registry
 
@@ -241,7 +242,7 @@ An agent served as a normal AgentCore entrypoint (`BedrockAgentCoreApp` with `@a
 | `@a2a_compatible` | Lets the other agents **call** yours, without changing your entrypoint |
 | `PEER_TOOLS` + `configure()` | Let yours **call** the other agents: `find_peer_agents` and `ask_peer_agent`, with the loop guard, registry mode and local mode |
 
-The step-by-step guide is in [User Guide §9](docs/USER_GUIDE.md#9-bringing-in-an-existing-non-a2a-agent).
+The step-by-step guide is the **[A2A Onboarding Guide](docs/A2A_ONBOARDING_GUIDE.md)**.
 
 ### The `@a2a_compatible` decorator
 
@@ -294,7 +295,7 @@ def invoke(payload, context):
     return {"result": str(agent(payload["prompt"]))}   # pass the prompt unchanged
 ```
 
-Set `REGISTRY_ID` (or `LOCAL_PEER_URLS` locally), give its role the registry-search and `InvokeAgentRuntime` permissions, and add a "Working with other agents" section to its system prompt (§9.2 in the guide).
+Set `REGISTRY_ID` (or `LOCAL_PEER_URLS` locally), give its role the registry-search and `InvokeAgentRuntime` permissions, and add a "Working with other agents" section to its system prompt ([onboarding guide §6–8](docs/A2A_ONBOARDING_GUIDE.md#6-step-3-let-it-call-other-agents)).
 
 **Pass the prompt to the agent unchanged.** The loop guard recognises peer requests by the `[A2A request from …]` prefix at the start of the prompt. Put extra instructions in the system prompt or after the prompt text, never before it.
 
