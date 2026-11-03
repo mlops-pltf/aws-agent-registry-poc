@@ -277,7 +277,10 @@ If your payload or return shape differs, pass options:
 @a2a_compatible(prompt_key="input")                                   # payload key isn't "prompt"
 @a2a_compatible(build_payload=lambda text, req: {"prompt": text, "user": "a2a"})
 @a2a_compatible(extract_answer=lambda result: result["output"]["text"])
+@a2a_compatible(extract_answer=a2a_answer_from)   # replies shaped {"status", "agent", "message", "finding"}
 ```
+
+`a2a_answer_from` returns `finding` when the execution succeeded, and the status and message as text when it didn't, so the calling agent knows what went wrong.
 
 Errors come back as JSON-RPC errors: `-32601` for A2A methods other than `message/send`, `-32602` for a message with no text, and `-32603` if your entrypoint raises (the exception is logged).
 

@@ -20,9 +20,11 @@ parts you need:
    Works with sync, async and streaming entrypoints, with or without `context`.
 
    If the answer isn't under result/response/output/answer/text/message/content,
-   say where it is:
+   say where it is. For replies shaped {"status", "agent", "message", "finding"}:
 
-       @a2a_compatible(extract_answer=lambda r: r["finding"])
+       @a2a_compatible(extract_answer=a2a_answer_from)
+
+   or for any other single field: extract_answer=lambda r: r["output"]["text"].
 
 2. Let your agent call others: the peer tools
 
@@ -192,6 +194,28 @@ def default_extract_answer(result: Any) -> str:
                 return default_extract_answer(result[key])
         return json.dumps(result, default=str)
     return str(result)  # e.g. a Strands AgentResult
+
+
+def a2a_answer_from(result: Any, answer_key: str = "finding") -> str:
+    """extract_answer for replies shaped {"status", "agent", "message", "finding"}.
+
+    Returns the answer field, which is only present when the execution
+    succeeded (formatted as JSON if it isn't text). Without it, returns the
+    status and message as text, so the calling agent learns what went wrong
+    instead of getting a generic error.
+
+        @a2a_compatible(extract_answer=a2a_answer_from)
+
+    For a differently named answer field:
+
+        @a2a_compatible(extract_answer=functools.partial(a2a_answer_from, answer_key="output"))
+    """
+    if not isinstance(result, dict):
+        return default_extract_answer(result)
+    answer = result.get(answer_key)
+    if answer:
+        return answer if isinstance(answer, str) else json.dumps(answer, indent=2, default=str)
+    return f"No {answer_key} (status: {result.get('status')}): {result.get('message')}"
 
 
 def _is_a2a(payload: Any) -> bool:
@@ -510,6 +534,7 @@ else:
 __all__ = [
     "a2a_compatible",
     "default_extract_answer",
+    "a2a_answer_from",
     "configure",
     "search_peers",
     "call_peer",

@@ -108,25 +108,32 @@ Supported entrypoint styles:
 
 For a dict return value, the decorator uses the first of these keys that's present: `result`, `response`, `output`, `answer`, `text`, `message`, `content`. If your answer is somewhere else, **tell the decorator where**, or the caller gets the wrong text.
 
-**Example:** an entrypoint that returns `{"status": ..., "agent": ..., "message": "Request processed successfully", "finding": ...}`. By default the decorator picks `message`, so the calling agent only hears "Request processed successfully". Point it at `finding` instead, and report failures as text so the caller knows what went wrong:
+**Replies shaped `{"status", "agent", "message", "finding"}`.** By default the decorator picks `message`, so the calling agent only hears "Request processed successfully". The bridge has a ready-made reader for this shape, `a2a_answer_from`:
 
 ```python
-import json
-from a2a_bridge import a2a_compatible
-
-def answer_from(result: dict) -> str:
-    finding = result.get("finding")
-    if finding:  # only present when the execution succeeded
-        return finding if isinstance(finding, str) else json.dumps(finding, indent=2, default=str)
-    return f"No finding (status: {result.get('status')}): {result.get('message')}"
+from a2a_bridge import a2a_answer_from, a2a_compatible
 
 @app.entrypoint
-@a2a_compatible(extract_answer=answer_from)
+@a2a_compatible(extract_answer=a2a_answer_from)
 def invoke(payload, context):
     ...
 ```
 
-Return text on failure rather than raising. If `extract_answer` raises, the caller only gets a generic "Internal error" and loses your message.
+| Your entrypoint returns | The calling agent receives |
+|---|---|
+| `finding` as text | The finding as is |
+| `finding` as a dict or list | The finding as formatted JSON |
+| No `finding` (the execution failed) | `No finding (status: <status>): <message>`, so it knows what went wrong |
+| Something that isn't a dict | The default behaviour (as `default_extract_answer`) |
+
+If the answer field has another name, pass it with `functools.partial`:
+```python
+import functools
+
+@a2a_compatible(extract_answer=functools.partial(a2a_answer_from, answer_key="output"))
+```
+
+**Any other shape:** pass your own function, for example `@a2a_compatible(extract_answer=lambda r: r["output"]["text"])`. Return text on failure rather than raising. If `extract_answer` raises, the caller only gets a generic "Internal error" and loses your message.
 
 ### 5.3 Other options
 
@@ -353,6 +360,7 @@ LOCAL_PEER_URLS=http://localhost:9000,http://localhost:9001 AWS_PROFILE=<profile
 |---|---|---|
 | `a2a_compatible` | Decorator | Answer A2A `message/send` in an existing entrypoint ([Step 2](#5-step-2-let-other-agents-call-it)) |
 | `default_extract_answer(result)` | Function | The decorator's default way of turning a return value into answer text |
+| `a2a_answer_from(result, answer_key="finding")` | Function | `extract_answer` for `{"status", "agent", "message", "finding"}` replies: the answer field, or status and message when it's missing ([§5.2](#52-make-sure-the-right-field-is-sent-back)) |
 | `PEER_TOOLS` | List | `[find_peer_agents, ask_peer_agent]` for `Agent(tools=...)`; empty without Strands |
 | `find_peer_agents(need)` | Strands tool | Searches for agents that can help with a need |
 | `ask_peer_agent(record_name, question)` | Strands tool | Asks one of them a question, with the loop guard |
@@ -380,7 +388,7 @@ If you need any of the ❌ rows and the agent is yours to change, move it to `se
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Calling agent only gets "Request processed successfully" (or another status line) | The decorator picked a status field from your return dict | Set `extract_answer` to the real answer field ([§5.2](#52-make-sure-the-right-field-is-sent-back)) |
+| Calling agent only gets "Request processed successfully" (or another status line) | The decorator picked a status field from your return dict | Use `extract_answer=a2a_answer_from` for `status`/`message`/`finding` replies, or point `extract_answer` at the real field ([§5.2](#52-make-sure-the-right-field-is-sent-back)) |
 | Calling agent gets "Internal error" | Your entrypoint or `extract_answer` raised | Check this agent's logs for "Entrypoint failed on A2A request" |
 | Calling agent gets "Method not found" | It sent something other than `message/send` (e.g. streaming) | Only `message/send` is supported ([§12](#12-limits-compared-with-serve_a2a)) |
 | Your agent isn't found by others | Record not `APPROVED`, card `name`/`description`/skills too vague, or not in the top results | Approve it; make the card specific ([§9.1](#91-write-the-card)) |
@@ -399,7 +407,7 @@ If you need any of the ❌ rows and the agent is yours to change, move it to `se
 **Other agents can call it**
 - [ ] `a2a_bridge.py` is next to the entrypoint and copied into the image
 - [ ] `@a2a_compatible` is below `@app.entrypoint`
-- [ ] `extract_answer` is set if the answer isn't under a standard key
+- [ ] `extract_answer` is set if the answer isn't under a standard key (`a2a_answer_from` for `status`/`message`/`finding` replies)
 - [ ] The A2A card is written: `name`, specific `description` and skills, encoded `url`, `streaming: false`
 - [ ] The record is registered and `APPROVED`
 - [ ] Callers' roles have `InvokeAgentRuntime` on this runtime (both ARN forms)
