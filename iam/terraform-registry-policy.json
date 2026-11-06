@@ -1,0 +1,77 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageRegistry",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:CreateRegistry",
+        "agent-registry:GetRegistry",
+        "agent-registry:UpdateRegistry",
+        "agent-registry:DeleteRegistry",
+        "agent-registry:ListRegistries",
+        "agent-registry:TagResource",
+        "agent-registry:UntagResource",
+        "agent-registry:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RegistryWorkloadIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:CreateWorkloadIdentity",
+        "bedrock-agentcore:DeleteWorkloadIdentity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RegistryServiceLinkedRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageRecords",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:CreateRegistryRecord",
+        "agent-registry:ListRegistryRecords"
+      ],
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/*"
+    },
+    {
+      "Sid": "ManageRecordLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "agent-registry:GetRegistryRecord",
+        "agent-registry:UpdateRegistryRecord",
+        "agent-registry:DeleteRegistryRecord",
+        "agent-registry:SubmitRegistryRecordForApproval",
+        "agent-registry:TagResource",
+        "agent-registry:UntagResource",
+        "agent-registry:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/*/record/*"
+    },
+    {
+      "Sid": "ApproveRecordsOnlyForApprovePending",
+      "Effect": "Allow",
+      "Action": "agent-registry:UpdateRegistryRecordStatus",
+      "Resource": "arn:aws:agent-registry:<REGION>:<ACCOUNT_ID>:registry/*/record/*"
+    },
+    {
+      "Sid": "CloudControlForAwsccProvider",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateResource",
+        "cloudformation:GetResource",
+        "cloudformation:UpdateResource",
+        "cloudformation:DeleteResource",
+        "cloudformation:GetResourceRequestStatus",
+        "cloudformation:ListResources"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

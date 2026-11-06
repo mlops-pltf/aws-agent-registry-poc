@@ -57,6 +57,8 @@ examples/
 iam/
   agent-runtime-policy.json   Attach to each agent's execution role
   registration-policy.json    Least-privilege role for registration
+  terraform-registry-policy.json   Role that runs the Terraform below
+terraform/             Registry + agent registration from A2A cards (Terraform)
 docs/
   USER_GUIDE.md        Deploy, register, demo, extend, troubleshoot
   A2A_ONBOARDING_GUIDE.md   Bring an existing entrypoint agent into the network with a2a_bridge
@@ -217,6 +219,19 @@ The permissions it needs are in [`iam/registration-policy.json`](iam/registratio
    - **Name:** for example `artist-agent`
 3. Submit the record for approval and approve it.
 4. Check it: search for "investment planning" and confirm the banker's record comes back.
+
+### Option C: Terraform
+
+[`terraform/`](terraform) creates the registry itself and registers agents from developer-provided A2A card JSON files. It does the same create, update and submit steps as the script; agent runtimes stay in your existing pipeline. See [terraform/README.md](terraform/README.md).
+
+```hcl
+agents = {
+  "artist-agent" = {
+    card_file   = "../registry-cards/artist.agent-card.json"
+    runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/artist_agent-AbC123XyZ9"
+  }
+}
+```
 
 ### When to register again
 

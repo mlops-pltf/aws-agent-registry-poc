@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars and fill in.
+
+region        = "us-east-1"
+registry_name = "agent-network"
+registry_description = "Agents of the agent-registry POC"
+
+# true: records are approved as soon as they are submitted.
+# false: a curator approves them (in the console, or set approve_pending = true).
+auto_approve = true
+
+tags = {
+  project = "agent-registry-poc"
+}
+
+# One entry per agent, keyed by record name. card_file is the developer's A2A card.
+# With runtime_arn, the card's url is filled in; without it, the card must
+# already contain https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded ARN>/invocations/
+agents = {
+  "artist-agent" = {
+    card_file   = "../registry-cards/artist.agent-card.json"
+    runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/artist_agent-XXXXXXXXXX"
+  }
+  "investment-banker-agent" = {
+    card_file   = "../registry-cards/investment_banker.agent-card.json"
+    runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/investment_banker_agent-XXXXXXXXXX"
+  }
+  "fitness-trainer-agent" = {
+    card_file   = "../registry-cards/fitness_trainer.agent-card.json"
+    runtime_arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/fitness_trainer_agent-XXXXXXXXXX"
+  }
+}

@@ -143,6 +143,10 @@ Running it again never creates duplicates. Re-run it whenever a runtime ARN or a
 4. Submit the record for approval and approve it. **Search only returns `APPROVED` records.**
 5. Check it: search for "investment planning" in the console and confirm the banker record comes back.
 
+### Option C: Terraform
+
+[`terraform/`](../terraform) creates the registry and registers agents from their A2A card JSON files, then submits each record for approval (as the script does). Agent runtimes aren't deployed by it. Usage, settings, IAM ([`iam/terraform-registry-policy.json`](../iam/terraform-registry-policy.json)) and tests are in [terraform/README.md](../terraform/README.md). Manage each record with one tool only, Terraform or the script.
+
 ### When to re-register
 
 | Change | Action |
